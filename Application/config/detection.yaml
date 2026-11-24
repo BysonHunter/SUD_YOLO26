@@ -1,0 +1,10 @@
+imgsz: 640
+conf: 0.3
+iou: 0.3
+max_det: 1000
+device: cpu
+stone_confidence:
+  1: 0.3
+  5: 0.6
+# Chosen on validation set: ordinary stones 0.3, staghorn stones 0.6.
+# Existing SUD_v3 rules, not a substitute for dissertation fuzzy inference.

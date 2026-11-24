@@ -1,0 +1,7 @@
+language: Русский
+weights: weights/kidney_yolo26.pt
+dicom_input: data/dicom
+output: data/output
+theme: SystemDefault
+image_count: 200
+image_format: png

@@ -1,0 +1,2 @@
+# Search halo in mm. The output mask is trimmed to its occupied bounds.
+stone_roi_padding_mm: 2.0

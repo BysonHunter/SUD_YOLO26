@@ -1,0 +1,4 @@
+# Optional compressed-pixel decoders from the pydicom 3.0.2 extras.
+# Install only if a source TransferSyntaxUID requires them; validate on that scanner.
+-r requirements.txt
+pydicom[pixeldata]==3.0.2
