@@ -4,6 +4,9 @@
 !/README.md
 !/INSTALL.md
 !/USER_GUIDE.md
+!/Demo_video/
+/Demo_video/*
+!/Demo_video/SUD_YOLO26_new_interface.mp4
 !/Application/
 /Application/*
 !/Application/src/
