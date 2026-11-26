@@ -21,7 +21,7 @@ def main():
         app.processEvents()
         print('WORKSPACE_IMPORT_AND_WINDOW_OK')
         window.close();return 0
-    window.show()
+    window.showMaximized()
     if args.screenshot:
         if window.job is not None:window.job.wait()
         app.processEvents()
