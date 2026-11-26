@@ -1,0 +1,20 @@
+{
+  "source": "yolo26s_3090_20261118_183103_027433/weights/best.pt",
+  "sha256": "b148032482ce254bfc59f1400f216676e9aa0740782d51016ca17a91b752f62c",
+  "class_names": {
+    "0": "left_kidney",
+    "1": "stone",
+    "2": "right_kidney",
+    "3": "left_kidney_pieloectasy",
+    "4": "right_kidney_pieloectasy",
+    "5": "staghorn_stones"
+  },
+  "architecture": "yolo26s.yaml",
+  "quality_status": "Technical validation completed on patient-disjoint val/test; no clinical validation or DP/OR/GOV/DOV calibration supplied",
+  "evaluation": {
+    "date": "2026-11-24",
+    "device": "cpu",
+    "threshold_selection": "validation only; stone=0.3, staghorn_stones=0.6",
+    "test_patients": 1
+  }
+}

@@ -10,6 +10,10 @@
 !/Application/
 /Application/*
 !/Application/src/
+!/Application/weights/
+/Application/weights/*
+!/Application/weights/kidney_yolo26.pt
+!/Application/weights/model_manifest.json
 !/Application/config/
 !/Application/*.py
 !/Application/*.ps1
