@@ -4,18 +4,34 @@ import shutil
 
 import numpy as np
 from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices
+from PyQt6.QtGui import QColor, QDesktopServices, QPen
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QFrame, QLabel, QPushButton, QComboBox, QListWidget,
     QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QSplitter,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
-    QAbstractItemView,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QScrollArea, QLayout,
 )
 from sud_yolo26.lithotripsy.config import Config
-from sud_yolo26.reporting.pdf_report import detected_slice_image
+from sud_yolo26.reporting.pdf_report import detected_slice_image, _calc_laser_table
 from sud_yolo26.ui.views import StaticImageLabel
 from .theme import STYLE, workspace_font
 from .volume_view import VolumeView
+from .laser_legend import MODE_LEGEND, pdf_cell_colour, colour_mode
+
+
+class LaserCellDelegate(QStyledItemDelegate):
+    """Mark selection with a border, preserving the PDF background and text."""
+    def paint(self, painter, option, index):
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        option.state &= ~QStyle.StateFlag.State_Selected
+        super().paint(painter, option, index)
+        if selected:
+            painter.save()
+            painter.setPen(QPen(QColor('#172c37'), 3))
+            painter.drawRect(option.rect.adjusted(1, 1, -2, -2))
+            painter.setPen(QPen(QColor('white'), 1))
+            painter.drawRect(option.rect.adjusted(3, 3, -4, -4))
+            painter.restore()
 
 
 def laser_values(mass):
@@ -196,16 +212,18 @@ class StoneDetailsDialog(QDialog):
         layout.addLayout(row, 1)
         panel, box = self._panel()
         self.laser = self._table([])
+        self.laser.setItemDelegate(LaserCellDelegate(self.laser))
         self.laser.verticalHeader().show()
         self.laser.verticalHeader().setDefaultSectionSize(28)
         self.laser.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.laser.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
         self.laser.currentCellChanged.connect(self._select_regime)
         box.addWidget(self.laser, 1)
-        box.addWidget(self._label('Светлее — меньше время    •    Насыщеннее — больше время', 'Muted'))
+        box.addWidget(self._label('Цвета совпадают с PDF · наведите указатель на ячейку для подсказки.', 'Muted'))
+        box.addWidget(self._button('Легенда режимов', self.show_mode_legend))
         row.addWidget(panel, 1)
         panel, box = self._panel()
-        panel.setFixedWidth(265)
+        box.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         box.addWidget(self._label('Выбранный режим', 'Section'))
         self.regime = self._label()
         box.addWidget(self.regime)
@@ -217,9 +235,19 @@ class StoneDetailsDialog(QDialog):
         box.addSpacing(18)
         self.laser_mass = self._label()
         box.addWidget(self.laser_mass)
+        box.addSpacing(12)
+        box.addWidget(self._label('Режим по цветовой легенде', 'Muted'))
+        self.mode_name = self._label()
+        box.addWidget(self.mode_name)
         box.addStretch()
-        box.addWidget(self._label('Цвет отражает только время и не определяет предпочтительный режим.', 'Muted'))
-        row.addWidget(panel)
+        box.addWidget(self._label('Название расшифровывает цвет; отдельная оценка риска и пригодности режима не выполняется.', 'Muted'))
+        self.regime_scroll = QScrollArea()
+        self.regime_scroll.setWidgetResizable(True)
+        self.regime_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.regime_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.regime_scroll.setFixedWidth(265)
+        self.regime_scroll.setWidget(panel)
+        row.addWidget(self.regime_scroll)
         self.formula_toggle = self._button('Показать формулу и исходные данные', self._toggle_formula)
         self.formula_toggle.setCheckable(True)
         layout.addWidget(self.formula_toggle)
@@ -232,6 +260,32 @@ class StoneDetailsDialog(QDialog):
         visible = self.formula_toggle.isChecked()
         self.formula.setVisible(visible)
         self.formula_toggle.setText('Скрыть формулу и исходные данные' if visible else 'Показать формулу и исходные данные')
+
+    def show_mode_legend(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Цветовая легенда режимов')
+        dialog.resize(760, 470)
+        box = QVBoxLayout(dialog)
+        box.addWidget(self._label('Название режима по цвету ячейки', 'Section'))
+        table = self._table(['Цвет', 'Название режима'])
+        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        table.setColumnWidth(0, 65)
+        table.setWordWrap(True)
+        table.verticalHeader().setMinimumSectionSize(32)
+        table.setRowCount(len(MODE_LEGEND))
+        for i, (colour, name) in enumerate(MODE_LEGEND):
+            swatch = QTableWidgetItem()
+            swatch.setBackground(QColor(*colour))
+            table.setItem(i, 0, swatch)
+            table.setItem(i, 1, QTableWidgetItem(name))
+        table.resizeRowsToContents()
+        box.addWidget(table, 1)
+        box.addWidget(self._label('В PDF 10 оттенков: дополнительный синий относится к низкой плотности, '
+            'сине-фиолетовый — к дроблению осколков. Цвет определяется интервалом расчётного времени, '
+            'а не независимой классификацией состояния камня.', 'Muted'))
+        box.addWidget(self._button('Закрыть', dialog.accept))
+        dialog.exec()
 
     def current_stone(self):
         rows = self.result['RS_params' if self.side.currentIndex() == 0 else 'LS_params']
@@ -272,6 +326,8 @@ class StoneDetailsDialog(QDialog):
             self.regime.clear()
             self.time.setText('—')
             self.laser_mass.clear()
+            self.mode_name.clear()
+            self.mode_name.setStyleSheet('')
             self.formula.clear()
             self._show_preview()
             self.status.setText('На выбранной стороне нет рассчитанных камней.')
@@ -331,22 +387,26 @@ class StoneDetailsDialog(QDialog):
     def _update_laser(self, mass):
         old_row, old_col = self.laser.currentRow(), self.laser.currentColumn()
         self.cfg, self.energies, self.frequencies, self.times = laser_values(mass)
+        _, _, _, self.colour_bands = _calc_laser_table(float(mass))
         self.laser.blockSignals(True)
         self.laser.clear()
         self.laser.setRowCount(len(self.energies))
         self.laser.setColumnCount(len(self.frequencies))
         self.laser.setHorizontalHeaderLabels([number(v, 0) for v in self.frequencies])
         self.laser.setVerticalHeaderLabels([number(v, 1) for v in self.energies])
-        low, high = self.times.min(), self.times.max()
         for i in range(len(self.energies)):
             for j in range(len(self.frequencies)):
                 value = self.times[i, j]
-                ratio = (value - low) / (high - low) if high > low else 0
-                color = QColor(*[round(a + ratio * (b - a)) for a, b in zip((239, 248, 247), (114, 184, 179))])
+                band = pdf_cell_colour(value, self.colour_bands)
+                mode = colour_mode(band['background'])
                 item = QTableWidgetItem(number(value))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                item.setBackground(color)
-                item.setToolTip(f'{number(self.energies[i], 1)} Дж · {number(self.frequencies[j], 0)} Гц → {number(value)} ед. модели')
+                item.setBackground(QColor(*band['background']))
+                item.setForeground(QColor(*band['text']))
+                item.setData(Qt.ItemDataRole.UserRole, mode)
+                item.setToolTip(f'{mode}\n\nЭнергия: {number(self.energies[i], 1)} Дж\n'
+                    f'Частота: {number(self.frequencies[j], 0)} Гц\nВремя: {number(value)} ед. модели\n'
+                    'Название по цветовой легенде; отдельная оценка риска и пригодности не выполняется.')
                 self.laser.setItem(i, j, item)
         self.laser.blockSignals(False)
         self.laser.setCurrentCell(max(0, old_row), max(0, old_col))
@@ -365,6 +425,10 @@ class StoneDetailsDialog(QDialog):
                             f'Частота    {number(frequency, 0)} Гц\n\n'
                             f'Мощность    {number(energy * frequency, 1)} Вт')
         self.time.setText(number(self.times[i, j]))
+        item = self.laser.item(i, j)
+        self.mode_name.setText(item.data(Qt.ItemDataRole.UserRole))
+        self.mode_name.setStyleSheet(f'background:{item.background().color().name()};'
+            f'color:{item.foreground().color().name()};padding:10px;border-radius:6px;')
 
     def show_3d(self, kind):
         if kind == 'stone' and self.current_stone() is None:
