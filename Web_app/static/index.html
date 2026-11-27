@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SUD · YOLO26</title><link rel="stylesheet" href="/static/style.css">
+<script src="/assets/plotly.min.js" defer></script><script src="/static/app.js" defer></script></head>
+<body>
+<section id="login" class="login"><form id="login-form" class="card login-card">
+<div class="brand-mark">S</div><h1>SUD <span>YOLO26</span></h1><p class="muted">Анализ КТ мочевыделительной системы</p>
+<label>Логин<input id="username" autocomplete="username" required maxlength="80"></label>
+<label>Пароль<input id="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+<button class="primary" type="submit">Войти в систему →</button><p id="login-error" role="alert"></p>
+<small class="muted">Учётную запись предоставляет администратор сервера.</small></form></section>
+<div id="workspace" hidden>
+<aside><div class="logo"><div class="brand-mark">S</div><strong>SUD <span>YOLO26</span></strong></div>
+<p class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</p><nav>
+<button data-view="studies" class="active">01 <span>Исследования</span></button>
+<button data-view="images">02 <span>Изображения и детекции</span></button>
+<button data-view="stones">03 <span>Параметры и 3D</span></button>
+<button data-view="laser">04 <span>Время разрушения</span></button>
+<button id="users-nav" data-view="users" hidden>05 <span>Пользователи</span></button></nav>
+<div class="aside-bottom"><span id="account"></span><button id="password-settings" type="button">Сменить пароль</button><button id="logout">Выйти из системы</button><small>Приватные исследования · серверная обработка</small></div></aside>
+<main><header><div><p class="eyebrow">SMART UROLOGY · WEB</p><h1 id="page-title">Исследования</h1></div><span class="badge">YOLO26s</span></header>
+<p id="notice" role="status" hidden></p>
+<div id="study-bar" class="card study-bar" hidden><label>Серия исследования<select id="series"></select></label><span id="identity"></span><a id="pdf" class="button primary" hidden>Скачать PDF ↓</a></div>
+<section id="studies" class="view">
+<div class="card upload-card"><div><p class="eyebrow">НОВОЕ ИССЛЕДОВАНИЕ</p><h2>Загрузите архив DICOM</h2><p class="muted">Сохраните структуру каталогов и DICOMDIR, если он есть. Подготовка проекций, детекция и расчёт выполняются автоматически.</p></div>
+<label class="drop" id="drop">Выбрать ZIP-архив<input id="archive" type="file" accept=".zip,application/zip"><small id="upload-limit"></small></label><progress id="upload-progress" max="100" value="0" hidden></progress></div>
+<div class="section-head"><h2>Мои исследования</h2><button id="refresh">Обновить</button></div><div id="jobs" class="job-list"></div>
+</section>
+<section id="images" class="view" hidden><div class="card"><div class="toolbar"><label>Проекция<select id="projection"><option value="coronal">Корональная</option><option value="axial">Аксиальная</option></select></label>
+<label class="check"><input id="annotated" type="checkbox" checked> Детекции</label><label class="check"><input id="grid" type="checkbox" checked> Сетка, мм</label><label class="check"><input id="only-detected" type="checkbox"> Только с детекциями</label>
+<button id="zoom-out" aria-label="Уменьшить">−</button><button id="reset">По размеру</button><button id="zoom-in" aria-label="Увеличить">+</button></div>
+<div class="canvas-wrap"><canvas id="canvas" aria-label="Изображение КТ с миллиметровой шкалой"></canvas></div>
+<div class="slice-controls"><button id="previous">←</button><input id="slice" type="range" min="0" max="0" value="0" aria-label="Срез"><button id="next">→</button><span id="slice-info"></span></div><p id="dimensions" class="muted"></p>
+<small class="muted">Колесо мыши: увеличение; перетаскивание: перемещение. Номера слоёв сохранены из экспорта DICOM.</small></div></section>
+<section id="stones" class="view" hidden><div class="card"><div class="toolbar"><label>Почка<select id="side"><option value="right">Правая</option><option value="left">Левая</option></select></label><label>Камень<select id="stone"></select></label><span id="stone-count" class="muted"></span></div><div id="metrics" class="metrics"></div>
+<div class="toolbar"><button id="show-stone" class="primary">3D камня</button><button id="show-cut">Срез 15%</button><button id="show-kidney">3D почки и HU &gt;160</button><span id="model-info" class="muted"></span></div>
+<div id="model" class="model"><p class="muted">Выберите модель для интерактивного просмотра.</p></div>
+<div id="previews" class="previews"></div><p class="muted">Розовая оболочка почки — приближённая поверхность тканей в ROI. Плотные участки HU &gt;160 показаны внутри; оболочка служит для ориентации и не является анатомической сегментацией.</p></div></section>
+<section id="laser" class="view" hidden><div class="card"><p class="eyebrow">РАСЧЁТ ДЛЯ ВЫБРАННОГО КАМНЯ</p><h2 id="laser-title">Время разрушения</h2><p class="muted">Выберите почку и камень в разделе «Параметры и 3D». Цвета и формула соответствуют таблице PDF.</p><div class="table-wrap" id="laser-table"></div><p id="mode" role="status">Наведите указатель на ячейку или выберите её, чтобы увидеть название режима.</p><div id="legend" class="legend"></div><p class="muted">t = m / (γ · E · f), γ = 0,4. Единицы и интерпретация времени соответствуют исходной модели приложения; подписи режимов взяты из общей цветовой легенды.</p></div></section>
+<section id="users" class="view" hidden>
+<p class="muted">Создавайте учётные записи для работы с системой и управляйте доступом.</p>
+<div class="admin-layout">
+<form id="create-user-form" class="card user-form">
+<p class="eyebrow">НОВАЯ УЧЁТНАЯ ЗАПИСЬ</p><h2>Создать пользователя</h2>
+<label for="new-username">Логин<input id="new-username" name="new-username" autocomplete="off" required minlength="3" maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9_.@\-]{2,79}" aria-describedby="username-help"></label>
+<small id="username-help">От 3 до 80 символов: латинские буквы, цифры, _.@-</small>
+<label for="new-password">Пароль<input id="new-password" name="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128" aria-describedby="password-help"></label>
+<small id="password-help">От 12 до 128 символов. Передайте пароль пользователю лично.</small>
+<label class="check"><input id="show-new-password" type="checkbox"> Показать пароль</label>
+<button id="create-user" class="primary" type="submit">Создать пользователя</button>
+<p id="user-form-message" class="form-message" role="status" hidden></p>
+</form>
+<div class="card users-card"><div class="users-heading"><div><p class="eyebrow">ДОСТУП К СИСТЕМЕ</p><h2>Учётные записи</h2></div><button id="refresh-users" type="button">Обновить</button></div>
+<p id="users-count" class="muted" role="status"></p>
+<div class="table-wrap"><table class="users-table"><thead><tr><th scope="col">Пользователь</th><th scope="col">Статус</th><th scope="col">Исследования</th><th scope="col">Действие</th></tr></thead><tbody id="users-list"></tbody></table></div>
+<p class="muted users-note">Удаление закрывает доступ и завершает сеансы пользователя. Его исследования сохраняются на сервере. Учётная запись admin защищена от удаления.</p>
+</div></div></section>
+<section id="empty" class="card" hidden><h2>Сначала выберите готовое исследование</h2><p class="muted">Откройте результат в разделе «Исследования».</p></section>
+<dialog id="delete-user-dialog" aria-labelledby="delete-user-title"><h2 id="delete-user-title">Удалить пользователя?</h2><p id="delete-user-description"></p><p class="muted">Вход будет запрещён, открытые сеансы завершатся. Исследования сохранятся на сервере. Удалённый логин останется зарезервированным.</p><div class="dialog-actions"><button id="cancel-delete-user" type="button" autofocus>Отмена</button><button id="confirm-delete-user" class="danger" type="button">Удалить пользователя</button></div></dialog>
+<dialog id="password-dialog" aria-labelledby="password-title"><form id="change-password-form" class="user-form"><div><p class="eyebrow">МОЯ УЧЁТНАЯ ЗАПИСЬ</p><h2 id="password-title">Сменить пароль</h2></div>
+<label>Текущий пароль<input id="current-password" type="password" autocomplete="current-password" required maxlength="128"></label>
+<label>Новый пароль<input id="changed-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+<label>Повторите новый пароль<input id="confirm-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+<p class="muted users-note">От 12 до 128 символов. Новый пароль сохранится для следующих входов. На остальных устройствах потребуется войти заново.</p>
+<p id="password-message" class="form-message error" role="alert" hidden></p>
+<div class="dialog-actions"><button id="cancel-password" type="button">Отмена</button><button id="save-password" class="primary" type="submit">Сохранить пароль</button></div>
+</form></dialog>
+</main></div></body></html>

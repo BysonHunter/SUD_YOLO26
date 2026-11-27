@@ -1,4 +1,8 @@
-"""Stone rendering in physical millimetres. Volumes on disk are [Z,Y,X]."""
+"""Physical rendering of analysis arrays [coronal row, depth, column].
+
+Saved analysis rows run superior -> inferior, unlike canonical LPS volume Z.
+Rendering XYZ runs rightward on the image, into the image, then upward.
+"""
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
@@ -31,8 +35,12 @@ def legacy_spacing_xyz(parameters):
 
 
 def cube_xyz(volume_zyx):
-    """Keep original voxel indexing; exchange axes only, without mirror flips."""
-    return np.asarray(volume_zyx).transpose(2, 1, 0)
+    """Analysis rows down -> display Z up; keep X and depth Y unchanged.
+
+Accepts RK/LK/st_*.npy analysis arrays, NOT volume/hu_lps.npy (already Z up).
+This view changes neither the saved HU nor any quantitative calculation.
+"""
+    return np.asarray(volume_zyx)[::-1, :, :].transpose(2, 1, 0)
 
 
 def validate_cube(cube):
@@ -54,7 +62,7 @@ def cutaway(cube):
     return cube[tuple(slice(0, max(1, int(n*.85))) for n in cube.shape)]
 
 
-def style_axes(ax, extent, elevation=15, azimuth=75):
+def style_axes(ax, extent, elevation=0, azimuth=-90):
     ax.set(xlabel='X, мм', ylabel='Y, мм', zlabel='Z, мм',
            xlim=(0, extent[0]), ylim=(0, extent[1]), zlim=(0, extent[2]))
     # Matplotlib may normalize an ndarray in place; do not mutate the shared full extent.
@@ -87,7 +95,7 @@ def density_layers(cube, reference=None, count=6):
             yield np.where(mask, cube, 0), float(.25+.75*(index/(count-1))**1.25)
 
 
-def draw_voxels(ax, cube, spacing_xyz, cmap, norm, extent=None, elevation=15, azimuth=75,
+def draw_voxels(ax, cube, spacing_xyz, cmap, norm, extent=None, elevation=0, azimuth=-90,
                 reference=None):
     cube = validate_cube(cube)
     spacing = checked_spacing(spacing_xyz)
@@ -107,7 +115,7 @@ def draw_voxels(ax, cube, spacing_xyz, cmap, norm, extent=None, elevation=15, az
     style_axes(ax, np.asarray(cube.shape)*spacing if extent is None else extent, elevation, azimuth)
 
 
-def voxel_figure(cube, spacing_xyz, elevation=15, azimuth=75, cmap=cm.afmhot, dpi=100):
+def voxel_figure(cube, spacing_xyz, elevation=0, azimuth=-90, cmap=cm.afmhot, dpi=100):
     cube = validate_cube(cube)
     spacing = checked_spacing(spacing_xyz)
     extent = np.asarray(cube.shape)*spacing
@@ -177,11 +185,12 @@ def interactive_figure(cube, spacing_xyz):
         scene=dict(xaxis=dict(title='X, мм', range=[0, extent[0]]),
                    yaxis=dict(title='Y, мм', range=[0, extent[1]]),
                    zaxis=dict(title='Z, мм', range=[0, extent[2]]),
-                   aspectmode='data', camera=dict(projection=dict(type='orthographic'))))
+                   aspectmode='data', camera=dict(eye=dict(x=0, y=-2, z=0),
+                       up=dict(x=0, y=0, z=1), projection=dict(type='orthographic'))))
     return fig
 
 
-def projection_figure(volume_zyx, spacing_xyz, elevation=15, azimuth=75, cmap=cm.afmhot):
+def projection_figure(volume_zyx, spacing_xyz, elevation=0, azimuth=-90, cmap=cm.afmhot):
     volume = validate_cube(volume_zyx)
     sx, sy, sz = checked_spacing(spacing_xyz)
     nz, ny, nx = volume.shape
@@ -197,7 +206,7 @@ def projection_figure(volume_zyx, spacing_xyz, elevation=15, azimuth=75, cmap=cm
         (222, volume[:,:,ix], (0,ny*sy,0,nz*sz), 'Сагиттальная', ('Y, мм','Z, мм')),
         (223, volume[iz,:,:], (0,nx*sx,0,ny*sy), 'Аксиальная', ('X, мм','Y, мм'))]:
         ax = fig.add_subplot(position)
-        im = ax.imshow(data, origin='lower', extent=extent, interpolation='nearest', cmap=cmap, norm=norm)
+        im = ax.imshow(data, origin='upper', extent=extent, interpolation='nearest', cmap=cmap, norm=norm)
         ax.set(title=title, xlabel=labels[0], ylabel=labels[1])
         ax.set_aspect('equal')
         fig.colorbar(im, ax=ax, shrink=.7, label='HU')

@@ -77,6 +77,10 @@ class StaticImageLabel(QLabel):
         self._source_pixmap = QPixmap(str(path))
         self._fit_image()
 
+    def set_preview_pixmap(self,pixmap):
+        self._source_pixmap = pixmap
+        self._fit_image()
+
     def _fit_image(self):
         if self._source_pixmap.isNull():
             super().clear()

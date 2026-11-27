@@ -5,10 +5,40 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QInputDialog
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 from matplotlib.ticker import MultipleLocator, FuncFormatter, MaxNLocator
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 
 from sud_yolo26.imaging.calibration import ImageCalibration, image_calibration
+
+
+VIEW_BACKGROUND = '#16232d'
+RULER_COLOR = '#bfd1d8'
+
+
+class ImageTicks(MultipleLocator):
+    """Keep ruler ticks inside the physical bounds of the image."""
+    def __init__(self, step, end):
+        super().__init__(step)
+        self.end = end
+
+    def tick_values(self, vmin, vmax):
+        lower, upper = sorted((vmin, vmax))
+        if upper < 0 or lower > self.end:
+            return np.array([])
+        ticks = super().tick_values(max(0, lower), min(self.end, upper))
+        return ticks[(ticks >= 0) & (ticks <= self.end)]
+
+
+class ImageCanvas(FigureCanvasQTAgg):
+    def __init__(self, figure, prepare):
+        self.prepare = prepare
+        super().__init__(figure)
+
+    def draw(self):
+        self.prepare()
+        super().draw()
 
 
 class ImageNavigationToolbar(NavigationToolbar2QT):
@@ -26,9 +56,13 @@ class ImageNavigationToolbar(NavigationToolbar2QT):
 class ImageCoordinates(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.figure = Figure(figsize=(5, 5), layout='constrained')
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.figure = Figure(figsize=(5, 5), facecolor=VIEW_BACKGROUND)
         self.axes = self.figure.add_subplot(111)
+        self.canvas = ImageCanvas(self.figure, self._prepare_canvas)
+        self.ruler_baseline = Line2D([], [], transform=self.figure.transFigure,
+                                     color='#8ca5ae', linewidth=.8)
+        self.figure.add_artist(self.ruler_baseline)
+        self.label_steps_mm = (5, 5)
         self.toolbar = ImageNavigationToolbar(self.canvas, self, coordinates=False)
         self.dimensions = QLabel('')
         self.dimensions.setWordWrap(True)
@@ -36,12 +70,19 @@ class ImageCoordinates(QWidget):
         self.dimensions.setStyleSheet('font-weight: 600;')
         self.status = QLabel('')
         self.status.setWordWrap(True)
+        self.grid_button = QPushButton('Сетка: вкл.')
+        self.grid_button.setCheckable(True)
+        self.grid_button.setChecked(True)
+        self.grid_button.setToolTip('Показать или скрыть миллиметровую сетку на изображении')
+        self.grid_button.toggled.connect(self._toggle_grid)
+        self.grid_button.setEnabled(False)
         self.calibrate_button = QPushButton('Задать масштаб')
         self.calibrate_button.setToolTip('Физический размер одного пикселя исходного PNG, мм/пиксель')
         self.calibrate_button.clicked.connect(self._manual_calibration)
         self.calibrate_button.setEnabled(False)
         row = QHBoxLayout()
         row.addWidget(self.status, stretch=1)
+        row.addWidget(self.grid_button)
         row.addWidget(self.calibrate_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -84,6 +125,7 @@ class ImageCoordinates(QWidget):
         self.axes.set_axis_on()
         height, width = self.pixels.shape[:2]
         calibrated = self.calibration is not None
+        self.grid_button.setEnabled(calibrated)
         sx, sy = ((self.calibration.x_mm, self.calibration.y_mm) if calibrated else (1, 1))
         # Image edges define local zero. Top PNG row stays at the top (large Y).
         self.axes.imshow(self.pixels, origin='upper', extent=(0, width*sx, 0, height*sy),
@@ -92,14 +134,22 @@ class ImageCoordinates(QWidget):
                       xlabel='X, мм' if calibrated else 'X, пиксели',
                       ylabel='Y, мм' if calibrated else 'Y, пиксели')
         self.axes.spines[['top', 'right']].set_visible(False)
-        self.axes.set_facecolor('black')
-        for axis in (self.axes.xaxis, self.axes.yaxis):
-            axis.set_major_locator(MultipleLocator(5) if calibrated else MaxNLocator(integer=True))
-            axis.set_minor_locator(MultipleLocator(1) if calibrated else MultipleLocator(10))
-            axis.set_major_formatter(FuncFormatter(lambda v, _: f'{v:g}'))
+        self.axes.spines['bottom'].set_visible(False)
+        self.axes.spines['left'].set_color('#8ca5ae')
+        self.axes.set_facecolor(VIEW_BACKGROUND)
+        self.axes.xaxis.label.set_color(RULER_COLOR)
+        self.axes.yaxis.label.set_color(RULER_COLOR)
+        self.axes.xaxis.label.set_fontsize(8)
+        self.axes.yaxis.label.set_fontsize(8)
+        for index, (axis, end) in enumerate(zip((self.axes.xaxis, self.axes.yaxis), (width*sx, height*sy))):
+            axis.set_major_locator(ImageTicks(5, end) if calibrated else MaxNLocator(integer=True))
+            axis.set_minor_locator(ImageTicks(1, end) if calibrated else MultipleLocator(10))
+            axis.set_major_formatter(FuncFormatter(lambda v, _, n=index: self._format_tick(v, n)))
         self.axes.tick_params(which='major', length=6, width=1, labelsize=7, direction='out')
         self.axes.tick_params(which='minor', length=3, width=.6, direction='out')
-        self.axes.tick_params(axis='x', labelrotation=90)
+        self.axes.tick_params(which='both', colors=RULER_COLOR)
+        self.axes.tick_params(axis='x', labelrotation=0)
+        self.ruler_baseline.set_visible(True)
         self.status.setText('Шкала: 1 мм; подписи: 5 мм. Увеличение — лупа, сброс — домик.' if calibrated
                             else 'Масштаб в мм неизвестен — показаны пиксели.')
         self.toolbar.update()  # discard zoom history belonging to the previous image
@@ -108,6 +158,41 @@ class ImageCoordinates(QWidget):
         self.axes.callbacks.connect('ylim_changed', self._update_grid)
         self._update_grid()
         self.canvas.draw_idle()
+
+    def _format_tick(self, value, axis):
+        if self.calibration is None:
+            return f'{value:g}'
+        step = self.label_steps_mm[axis]
+        return f'{value:g}' if np.isclose(value/step, round(value/step), atol=1e-7, rtol=0) else ''
+
+    def _prepare_canvas(self):
+        """Keep the left ruler at the viewport edge, without stretching the CT."""
+        if self.pixels is None:
+            return
+        width, height = self.figure.bbox.width, self.figure.bbox.height
+        ratio = self.canvas.device_pixel_ratio
+        left, bottom, right, top = np.array([54, 44, 16, 14])*ratio
+        if width <= left+right or height <= bottom+top:
+            return
+        self.axes.set_position([left/width, bottom/height,
+                               (width-left-right)/width, (height-bottom-top)/height])
+        self.axes.apply_aspect()  # equal physical scale; the image is centred in this rectangle
+        bounds = self.axes.get_window_extent()
+        self.axes.spines['left'].set_position(('axes', (left-bounds.x0)/bounds.width))
+        self.ruler_baseline.set_data([left/width, (width-right)/width], [bounds.y0/height]*2)
+        if self.calibration is not None:
+            spans = [abs(np.diff(self.axes.get_xlim())[0]), abs(np.diff(self.axes.get_ylim())[0])]
+            self.label_steps_mm = tuple(5*max(1, int(np.ceil(gap*span/(5*pixels))))
+                for gap, span, pixels in zip((36*ratio, 24*ratio), spans, (bounds.width, bounds.height)))
+            self._clip_grid()
+
+    def _clip_grid(self):
+        height, width = self.pixels.shape[:2]
+        clip = Rectangle((0, 0), width*self.calibration.x_mm, height*self.calibration.y_mm,
+                         transform=self.axes.transData)
+        for axis in (self.axes.xaxis, self.axes.yaxis):
+            for tick in (*axis.get_major_ticks(), *axis.get_minor_ticks()):
+                tick.gridline.set_clip_path(clip)
 
     def _update_grid(self, _axes=None):
         self.axes.grid(False, which='both')
@@ -118,15 +203,24 @@ class ImageCoordinates(QWidget):
             full_height = height*self.calibration.y_mm
             zoomed = (abs(np.diff(self.axes.get_xlim())[0]) < full_width*(1-1e-6)
                       or abs(np.diff(self.axes.get_ylim())[0]) < full_height*(1-1e-6))
-            self.grid_step_mm = 1 if zoomed else 5
-            self.axes.set_axisbelow(False)
-            self.axes.grid(True, which='major', color='white', alpha=.3, linewidth=.6)
-            if zoomed:
-                self.axes.grid(True, which='minor', color='white', alpha=.18, linewidth=.4)
-            self.status.setText(f'Сетка: {self.grid_step_mm} мм; подписи: 5 мм. '
+            if self.grid_button.isChecked():
+                self.grid_step_mm = 1 if zoomed else 5
+                self.axes.set_axisbelow(False)
+                self.axes.grid(True, which='major', color='#b9e5e9', alpha=.3, linewidth=.6)
+                if zoomed:
+                    self.axes.grid(True, which='minor', color='#b9e5e9', alpha=.18, linewidth=.4)
+                grid_status = f'Сетка: {self.grid_step_mm} мм'
+            else:
+                grid_status = 'Сетка выключена'
+            self._clip_grid()
+            self.status.setText(f'{grid_status}; основные деления: 5 мм. '
                                 'Увеличение — лупа, сброс — домик.')
         self._update_dimensions()
         self.canvas.draw_idle()
+
+    def _toggle_grid(self, visible):
+        self.grid_button.setText('Сетка: вкл.' if visible else 'Сетка: выкл.')
+        self._update_grid()
 
     def _fragment_dimensions(self, xlim=None, ylim=None):
         if self.pixels is None:
@@ -177,7 +271,9 @@ class ImageCoordinates(QWidget):
         self.grid_step_mm = None
         self.axes.clear()
         self.axes.set_axis_off()
+        self.ruler_baseline.set_visible(False)
         self.status.clear()
         self.dimensions.clear()
         self.calibrate_button.setEnabled(False)
+        self.grid_button.setEnabled(False)
         self.canvas.draw_idle()

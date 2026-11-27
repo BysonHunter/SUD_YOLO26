@@ -585,7 +585,7 @@ def main(input_path, show_ui=True, output_dir=None):
         render_sx, render_sy, render_sz = legacy_spacing_xyz(param_numpy)
         if np.any(only_stone > 0):
             fig_vox1 = v3d.stone_vox3D_visualisation(
-                cube_xyz(only_stone), render_sz, render_sx, render_sy, 12, 75
+                cube_xyz(only_stone), render_sz, render_sx, render_sy
             )
             stone_image_name = get_output_path() + '/stone' + index_kidney + str(index) + '_1' + '.png'
             fig_vox1.savefig(stone_image_name, transparent=True, bbox_inches='tight', format='png')
@@ -594,7 +594,7 @@ def main(input_path, show_ui=True, output_dir=None):
         # plot 3D image of reduced density of stones
         if np.any(new_dens_stone > 0):
             fig_vox2 = v3d.stone_vox3D_visualisation(
-                cube_xyz(new_dens_stone), render_sz, render_sx, render_sy, 12, 75, cm.Set1
+                cube_xyz(new_dens_stone), render_sz, render_sx, render_sy, cmap=cm.Set1
             )
             stone_image_name = get_output_path() + '/stone' + index_kidney + str(index) + '_2' + '.png'
             fig_vox2.savefig(stone_image_name, transparent=True, bbox_inches='tight', format='png')

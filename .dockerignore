@@ -1,0 +1,21 @@
+# Never send CT images, training datasets, runs, credentials or local environments to Docker.
+**
+!Web_app/
+!Web_app/Dockerfile
+!Web_app/requirements.txt
+!Web_app/backend/
+!Web_app/backend/**
+!Web_app/static/
+!Web_app/static/**
+!Application/
+!Application/src/
+!Application/src/**
+!Application/config/
+!Application/config/detection.yaml
+!Application/config/analysis.yaml
+!Application/requirements.txt
+!Application/constraints.txt
+**/__pycache__
+**/*.pyc
+**/*.pkl
+**/.env*

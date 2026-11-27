@@ -4,7 +4,7 @@ import shutil
 
 import numpy as np
 from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QColor, QDesktopServices, QPen
+from PyQt6.QtGui import QColor, QDesktopServices, QPen, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QFrame, QLabel, QPushButton, QComboBox, QListWidget,
     QVBoxLayout, QHBoxLayout, QTabWidget, QStackedWidget, QSplitter,
@@ -57,6 +57,7 @@ class StoneDetailsDialog(QDialog):
         self.coronal = Path(coronal)
         self.result = result
         self.folder = Path(result['stones_dir_path'])
+        self._voxel_pixmaps = {}
         self.setObjectName('StoneDetails')
         self.setWindowTitle('SUD YOLO26 — подробный анализ камня')
         self.setFont(workspace_font())
@@ -371,6 +372,14 @@ class StoneDetailsDialog(QDialog):
         side = 'rk' if self.side.currentIndex() == 0 else 'lk'
         index = self.stones.currentRow()
         mode = self.preview.currentIndex()
+        if mode >= 2:
+            try:
+                self.image.set_preview_pixmap(self._voxel_preview(side, index, mode == 3))
+                self.image_caption.setText('Корональный вид: X вправо, Z вверх · полный объём и срез 15%')
+            except (OSError, ValueError, IndexError) as exc:
+                self.image.setText('Нет данных для воксельной модели')
+                self.image_caption.setText(str(exc))
+            return
         if mode == 0:
             path = detected_slice_image(self.coronal / 'detect', stone[1]) or detected_slice_image(self.coronal, stone[1])
         else:
@@ -383,6 +392,31 @@ class StoneDetailsDialog(QDialog):
         else:
             self.image.setText('Изображение недоступно')
             self.image_caption.setText('Для интерактивной модели используйте кнопку 3D.')
+
+    def _voxel_preview(self, side, index, density):
+        """Render cached analysis voxels with current orientation, preserving old PNGs."""
+        from matplotlib import cm, pyplot as plt
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from sud_yolo26.visualization.stone_geometry import cube_xyz, legacy_spacing_xyz, voxel_figure
+        path = self.folder / f'st_{side}_{index}.npy'
+        spacing = legacy_spacing_xyz(self.result['param_numpy'])
+        key = (str(path), path.stat().st_mtime_ns, spacing, density)
+        if key not in self._voxel_pixmaps:
+            values = np.load(path, allow_pickle=False)
+            if density:
+                from sud_yolo26.analysis.parameters import dens_stone_volume_from_hu, new_dens_stone_from_density
+                values = new_dens_stone_from_density(dens_stone_volume_from_hu(values)[0])
+            fig = voxel_figure(cube_xyz(values), spacing, cmap=cm.Set1 if density else cm.afmhot)
+            try:
+                canvas = FigureCanvasAgg(fig)
+                canvas.draw()
+                rgba = np.asarray(canvas.buffer_rgba())
+                image = QImage(rgba.data, rgba.shape[1], rgba.shape[0], rgba.strides[0],
+                               QImage.Format.Format_RGBA8888).copy()
+                self._voxel_pixmaps[key] = QPixmap.fromImage(image)
+            finally:
+                plt.close(fig)
+        return self._voxel_pixmaps[key]
 
     def _update_laser(self, mass):
         old_row, old_col = self.laser.currentRow(), self.laser.currentColumn()

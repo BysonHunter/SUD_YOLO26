@@ -286,13 +286,13 @@ def expand_coordinates(indices):
     return x, y, z
 
 
-def stone_vox3D_visualisation(cube, SliceThickness=1, x_thin=1, y_thin=1, st_angle=15, angle=75, cmap=cm.afmhot, dpi=100):
+def stone_vox3D_visualisation(cube, SliceThickness=1, x_thin=1, y_thin=1, st_angle=0, angle=-90, cmap=cm.afmhot, dpi=100):
     from .stone_geometry import voxel_figure
     return voxel_figure(cube, (x_thin, y_thin, SliceThickness), st_angle, angle, cmap, dpi)
 
 
 def stone_3proj_view(ds_array, frame_size_of_stone, realLength_stone, realHeight_stone, SliceThickness=1,
-                     x_thin=1, y_thin=1, st_angle=15, angle=75, cmap=cm.afmhot):
+                     x_thin=1, y_thin=1, st_angle=0, angle=-90, cmap=cm.afmhot):
     from .stone_geometry import projection_figure
     return projection_figure(ds_array, (x_thin, y_thin, SliceThickness), st_angle, angle, cmap)
 

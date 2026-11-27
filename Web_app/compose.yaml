@@ -1,0 +1,90 @@
+name: sud-yolo26
+x-runtime: &runtime
+  DATABASE_URL: postgresql+psycopg://sud:${POSTGRES_PASSWORD:?Run python configure.py first}@database:5432/sud
+  SUD_DATA_DIR: /data
+  SUD_SECURE_COOKIE: ${SUD_SECURE_COOKIE:-false}
+  SUD_PUBLIC_ORIGIN: ${SUD_PUBLIC_ORIGIN:-http://localhost:8080}
+  SUD_UPLOAD_LIMIT: ${SUD_UPLOAD_LIMIT:-2147483648}
+  SUD_UNPACK_LIMIT: ${SUD_UNPACK_LIMIT:-8589934592}
+  SUD_MAX_USER_BYTES: ${SUD_MAX_USER_BYTES:-42949672960}
+  SUD_MAX_ACTIVE_JOBS: ${SUD_MAX_ACTIVE_JOBS:-3}
+  SUD_MAX_SAVED_JOBS: ${SUD_MAX_SAVED_JOBS:-30}
+  SUD_JOB_TIMEOUT: ${SUD_JOB_TIMEOUT:-3600}
+services:
+  database:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: sud
+      POSTGRES_USER: sud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python configure.py first}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U sud -d sud']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  permissions:
+    image: busybox:1.37
+    user: '0:0'
+    command: [sh, -c, 'chown 10001:10001 /data && chmod 700 /data']
+    volumes: [studies:/data]
+    network_mode: none
+  initialize:
+    build: {context: .., dockerfile: Web_app/Dockerfile, target: api}
+    image: sud-yolo26-api:local
+    environment:
+      <<: *runtime
+      SUD_BOOTSTRAP_USER: ${SUD_BOOTSTRAP_USER:-admin}
+      SUD_BOOTSTRAP_PASSWORD: ${SUD_BOOTSTRAP_PASSWORD:?Run python configure.py first}
+    command: [python, -m, sudweb.manage, init]
+    volumes: [studies:/data]
+    depends_on:
+      database: {condition: service_healthy}
+      permissions: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+  api:
+    build: {context: .., dockerfile: Web_app/Dockerfile, target: api}
+    image: sud-yolo26-api:local
+    environment: *runtime
+    ports: ['${SUD_BIND:-127.0.0.1}:${SUD_PORT:-8080}:8080']
+    volumes: [studies:/data]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=5)']
+      interval: 20s
+      timeout: 8s
+      retries: 3
+  worker:
+    build: {context: .., dockerfile: Web_app/Dockerfile, target: worker}
+    image: sud-yolo26-worker:local
+    environment:
+      <<: *runtime
+      SUD_DEVICE: cpu
+      SUD_MAX_VOXELS: ${SUD_MAX_VOXELS:-300000000}
+      SUD_MAX_SERIES: ${SUD_MAX_SERIES:-8}
+    volumes:
+      - studies:/data
+      - ../Application/weights:/models:ro
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ['/tmp:size=1g']
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: ${SUD_WORKER_MEMORY:-12g}
+    cpus: ${SUD_WORKER_CPUS:-4}
+    stop_grace_period: 20s
+volumes:
+  postgres:
+  studies:

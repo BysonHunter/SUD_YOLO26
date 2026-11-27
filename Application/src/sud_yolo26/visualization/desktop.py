@@ -33,11 +33,11 @@ def _scene(plotter, extent, title, transparent_layers=True):
     _text(plotter, title)
     _text(plotter, 'Размер ROI: ' + ' × '.join(f'{v:.2f}' for v in extent) + ' мм',
           position='lower_left', size=11)
-    # View the positive XYZ volume from its +X/-Y side, with Z upright.
-    # The common zero of the three axes then sits at the lower left.
+    # Coronal front: X right, Z up, Y into the image. Same initial view for
+    # kidney and stone; a diagonal camera can obscure their spatial relation.
     center=np.asarray(extent,dtype=float)/2
     distance=max(float(np.linalg.norm(extent)),1.)
-    plotter.camera_position=[tuple(center+distance*np.array([1.,-1.,.45])),
+    plotter.camera_position=[tuple(center+distance*np.array([0.,-1.,0.])),
                              tuple(center),(0.,0.,1.)]
     plotter.reset_camera(bounds=bounds)
     plotter.camera.zoom(.8)  # reserve room for titles, ticks and controls

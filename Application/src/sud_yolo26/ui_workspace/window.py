@@ -101,8 +101,6 @@ class WorkspaceWindow(QMainWindow):
         self.kidney_3d=self._button('3D почки',lambda:self.show_3d('kidney'));toolbar.addWidget(self.kidney_3d)
         view_box.addLayout(toolbar)
         self.views=QStackedWidget();self.image=ImageCoordinates()
-        # Qt application font is untouched; presentation changes are scoped here.
-        self.image.figure.set_facecolor('#f3f6f8')
         self.plain=StaticImageLabel();self.plain.setStyleSheet('background:#111b23;')
         self.plain.setMinimumSize(200,200)
         self.volume=VolumeView();self.views.addWidget(self.image);self.views.addWidget(self.plain);self.views.addWidget(self.volume)
@@ -348,9 +346,7 @@ class WorkspaceWindow(QMainWindow):
         index=max(0,min(index,len(self.paths)-1));path=self.paths[index]
         self.image_name.setText(path.name);self.image_name.setToolTip(str(path))
         self.slice_label.setText(f'Слой {layer_number(path)}   ·   {index+1} из {len(self.paths)}')
-        if self.stage==3:
-            self.plain.set_image(path);self.views.setCurrentIndex(1)
-        else:self.image.set_image(path);self.views.setCurrentIndex(0)
+        self.image.set_image(path);self.views.setCurrentIndex(0)
 
     def show_3d(self,kind):
         if not self.result:return
