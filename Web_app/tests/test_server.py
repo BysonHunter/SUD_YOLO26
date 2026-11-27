@@ -1,6 +1,7 @@
 """Run with: PYTHONPATH=backend python -m unittest discover -s tests -v."""
 
 import io
+import base64
 import json
 import stat
 import tempfile
@@ -19,6 +20,10 @@ from sudweb.manage import create_user
 from sudweb.archive import unpack_zip
 from sudweb.security import password_hash, password_matches
 from sqlalchemy import select
+from sudweb import transport
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import os
 
 
 class ServerTests(unittest.TestCase):
@@ -56,15 +61,25 @@ class ServerTests(unittest.TestCase):
         return response.json()["csrf"]
 
     def upload(self, client=None, csrf=None, data=b"PK\x03\x04test"):
-        return (client or self.client).post(
-            "/api/jobs",
-            content=data,
-            headers={
-                "Content-Type": "application/zip",
-                "X-File-Name": "study.zip",
-                "X-CSRF-Token": csrf or self.csrf,
-            },
-        )
+        client, csrf = client or self.client, csrf or self.csrf
+        if not isinstance(data, bytes):
+            data = b''.join(data)
+        headers = {'X-CSRF-Token': csrf}
+        key, nonce = AESGCM.generate_key(bit_length=256), os.urandom(8)
+        public = client.get('/api/upload-key').json()
+        rsa = serialization.load_der_public_key(base64.b64decode(public['spki']))
+        response = client.post('/api/jobs', json=dict(filename='study.zip', size=len(data),
+            wrapped_key=transport.b64(rsa.encrypt(key, transport.oaep())), nonce=transport.b64(nonce)), headers=headers)
+        if response.status_code != 201:
+            return response
+        job = response.json()['id']
+        for i, offset in enumerate(range(0, len(data), transport.CHUNK_SIZE)):
+            encrypted = AESGCM(key).encrypt(nonce+i.to_bytes(4,'big'),
+                data[offset:offset+transport.CHUNK_SIZE], transport.aad(job,len(data),i))
+            response=client.put(f'/api/jobs/{job}/upload/{i}', content=encrypted, headers=headers)
+            if response.status_code != 200:
+                return response
+        return client.post(f'/api/jobs/{job}/complete', headers=headers)
 
     def test_static_and_headers(self):
         response = self.client.get("/")
@@ -228,7 +243,9 @@ class ServerTests(unittest.TestCase):
             ).status_code,
             200,
         )
-        self.assertFalse(root.exists())
+        self.assertTrue(root.exists())
+        self.assertEqual(self.client.get('/api/jobs/'+job).status_code, 404)
+        self.assertEqual(self.client.get('/api/jobs').json(), [])
 
     def test_cancel_lease_and_atomic_claim(self):
         ids = [self.upload().json()["id"] for _ in range(2)]

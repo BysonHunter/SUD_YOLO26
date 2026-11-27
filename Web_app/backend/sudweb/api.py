@@ -9,9 +9,10 @@ from pathlib import Path
 import secrets
 import shutil
 import time
-from urllib.parse import unquote, urlsplit
+import os
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, func, update, delete
@@ -22,6 +23,10 @@ from .config import Settings, WEB_ROOT
 from .db import Database, User, LoginSession, LoginAttempt, Job, new_id
 from .security import digest, password_matches, password_hash
 from .manage import create_user, UserExists
+from . import transport
+from .studies import archive_study
+from . import registration
+from cryptography.exceptions import InvalidTag
 
 log = logging.getLogger(__name__)
 COOKIE = "sud_session"
@@ -59,8 +64,8 @@ def origin_allowed(origin, expected, request_origin):
         return False
 
 
-def job_json(job):
-    return {
+def job_json(job, owner=None, config=None):
+    data = {
         key: getattr(job, key)
         for key in (
             "id",
@@ -71,8 +76,21 @@ def job_json(job):
             "created",
             "updated",
             "error",
+            "deleted_by_user_at",
+            "archived_at",
+            "source_job_id",
         )
     }
+    data['display_status'] = ('В архиве' if job.archived_at else
+        'Удалено пользователем' if job.deleted_by_user_at else job.stage)
+    if owner is not None:
+        data['owner'] = owner.username
+        data['owner_deleted'] = owner.deleted_at is not None
+    if config is not None:
+        folder = (config.archive_dir(job.user_id, job.id) if job.archived_at
+                  else config.job_dir(job.user_id, job.id))
+        data['archive_available'] = (folder / 'input.zip').is_file()
+    return data
 
 
 def private_file(root, relative):
@@ -137,15 +155,14 @@ def create_app(settings=None, database=None):
         openapi_url=None,
     )
     app.state.config, app.state.db = config, db
+    app.state.transport_key = transport.private_key(config.data)
     app.add_middleware(GZipMiddleware, minimum_size=2048)
 
     @app.middleware("http")
     async def boundaries(request, call_next):
-        limit = (
-            config.upload_limit
-            if request.url.path == "/api/jobs" and request.method == "POST"
-            else 65536
-        )
+        limit = (transport.CHUNK_SIZE + 16
+                 if '/upload/' in request.url.path and request.method == 'PUT'
+                 else 65536)
         try:
             length = int(request.headers.get("content-length", "0"))
         except ValueError:
@@ -208,7 +225,9 @@ def create_app(settings=None, database=None):
     def owned(job_id, user):
         with db.session() as s:
             job = s.get(Job, job_id)
-            if job is None or job.user_id != user["id"]:
+            if job is None or (user['username'] != 'admin' and (
+                job.user_id != user['id'] or job.deleted_by_user_at is not None
+                or job.archived_at is not None or job.state == 'deleting')):
                 raise HTTPException(404, "Задание не найдено.")
             return job
 
@@ -216,7 +235,7 @@ def create_app(settings=None, database=None):
         job = owned(job_id, user)
         if job.state != "completed":
             raise HTTPException(409, "Обработка ещё не завершена.")
-        root = config.job_dir(user["id"], job.id)
+        root = config.job_dir(job.user_id, job.id)
         path = private_file(root, "result.json")
         if path.stat().st_size > 16 * 1024**2:
             raise HTTPException(
@@ -303,6 +322,30 @@ def create_app(settings=None, database=None):
             )
             return login_response(s, user)
 
+    @app.get('/api/registration')
+    def registration_info():
+        return registration.description(config)
+
+    @app.post('/api/register', status_code=201)
+    async def signup(request: Request):
+        if not config.registration.enabled:
+            raise HTTPException(403, 'Самостоятельная регистрация отключена администратором.')
+        peer = request.client.host if request.client else 'unknown'
+        if not await asyncio.to_thread(registration.rate_limit, db, peer):
+            raise HTTPException(429, 'Слишком много попыток регистрации. Повторите через час.')
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw)>4096:
+                raise HTTPException(413, 'Слишком большой запрос.')
+        try:
+            payload = json.loads(raw)
+            return await asyncio.to_thread(registration.register, db, config, payload)
+        except (FileExistsError,IntegrityError):
+            raise HTTPException(409, 'Это имя пользователя или email уже используется.')
+        except (ValueError,TypeError):
+            raise HTTPException(400, 'Проверьте имя, email и пароль (12–128 символов). Подтвердите согласие; если текст изменился, обновите страницу.')
+
     app.state.dummy_password = password_hash(secrets.token_hex(20))
 
     @app.get("/api/me")
@@ -322,6 +365,7 @@ def create_app(settings=None, database=None):
                 .where(User.deleted_at.is_(None))
                 .group_by(User.id).order_by(User.username))
             return [dict(id=user.id, username=user.username, enabled=user.enabled,
+                         email=user.email, consent_at=user.consent_at,
                          is_admin=user.username == 'admin', studies=count)
                     for user, count in rows]
 
@@ -389,141 +433,233 @@ def create_app(settings=None, database=None):
         return response
 
     @app.get("/api/jobs")
-    def jobs(user=Depends(identity)):
+    def jobs(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=200),
+             user=Depends(identity)):
         with db.session() as s:
-            return [
-                job_json(j)
-                for j in s.scalars(
-                    select(Job)
-                    .where(Job.user_id == user["id"])
-                    .order_by(Job.created.desc())
-                    .limit(100)
-                )
-            ]
+            query = select(Job, User).join(User, Job.user_id == User.id)
+            if user['username'] != 'admin':
+                query = query.where(Job.user_id == user['id'],
+                    Job.deleted_by_user_at.is_(None), Job.archived_at.is_(None),
+                    Job.state != 'deleting')
+            return [job_json(job, owner if user['username'] == 'admin' else None, config)
+                    for job, owner in s.execute(query.order_by(Job.created.desc(), Job.id)
+                                              .offset(offset).limit(limit))]
 
-    @app.post("/api/jobs", status_code=201)
-    async def upload(request: Request, user=Depends(identity)):
-        if request.headers.get("content-type", "").split(";")[0] != "application/zip":
-            raise HTTPException(415, "Загрузите ZIP-архив как application/zip.")
-        filename = Path(
-            unquote(request.headers.get("x-file-name", "dicom.zip")).replace("\\", "/")
-        ).name[:180]
-        if not filename.lower().endswith(".zip"):
-            raise HTTPException(415, "Поддерживаются ZIP-архивы.")
-        user_root = config.data / "users" / user["id"]
-        if await asyncio.to_thread(bytes_used, user_root) >= config.max_user_bytes:
-            raise HTTPException(
-                409, "Лимит хранения исчерпан. Удалите ненужные задания."
-            )
-        job_id = new_id()
-        with db.session() as s:
-            # Serialize quota reservations for this user on PostgreSQL.
-            account = s.scalar(select(User).where(User.id == user["id"]).with_for_update())
-            if account is None or not account.enabled or account.deleted_at is not None:
-                raise HTTPException(401, 'Войдите в систему.')
-            total = s.scalar(
-                select(func.count()).select_from(Job).where(Job.user_id == user["id"])
-            )
-            active = s.scalar(
-                select(func.count())
-                .select_from(Job)
-                .where(
-                    Job.user_id == user["id"],
-                    Job.state.in_(["uploading", "queued", "running"]),
-                )
-            )
-            if (
-                total >= config.max_total_jobs_per_user
-                or active >= config.max_jobs_per_user
-            ):
-                raise HTTPException(
-                    409,
-                    "Превышен лимит заданий. Дождитесь обработки или удалите старые.",
-                )
-            s.add(Job(id=job_id, user_id=user["id"], filename=filename))
-        root = config.job_dir(user["id"], job_id)
-        root.mkdir(parents=True)
-        count, last_heartbeat = 0, time.monotonic()
+    def reserve(s, user, size):
+        account = s.scalar(select(User).where(User.id == user['id']).with_for_update())
+        if account is None or not account.enabled or account.deleted_at is not None:
+            raise HTTPException(401, 'Войдите в систему.')
+        total = s.scalar(select(func.count()).select_from(Job).where(
+            Job.user_id == user['id'], Job.archived_at.is_(None)))
+        active = s.scalar(select(func.count()).select_from(Job).where(
+            Job.user_id == user['id'], Job.state.in_(['uploading', 'queued', 'running'])))
+        # Reserve the remaining declared upload size, including concurrent uploads.
+        pending = sum(max(0, json.loads(j.upload_envelope)['size'] - j.upload_bytes)
+                      for j in s.scalars(select(Job).where(Job.user_id == user['id'],
+                          Job.state == 'uploading', Job.upload_envelope.is_not(None))))
+        if (total >= config.max_total_jobs_per_user or active >= config.max_jobs_per_user
+                or bytes_used(config.data / 'users' / user['id']) + pending + size > config.max_user_bytes):
+            raise HTTPException(409, 'Лимит исследований или хранения исчерпан. Дождитесь обработки или обратитесь к администратору для архивирования.')
+
+    @app.get('/api/upload-key')
+    def upload_key(user=Depends(identity)):
+        return transport.public_key(app.state.transport_key)
+
+    @app.post('/api/jobs', status_code=201)
+    async def begin_upload(request: Request, user=Depends(identity)):
+        if request.headers.get('content-type', '').split(';')[0] != 'application/json':
+            raise HTTPException(415, 'Требуется зашифрованная загрузка. Обновите страницу.')
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > 4096:
+                raise HTTPException(413, 'Слишком большой запрос.')
         try:
-            with (root / "upload.part").open("xb") as output:
-                async for chunk in request.stream():
-                    count += len(chunk)
-                    if count > config.upload_limit:
-                        raise HTTPException(413, "Превышен допустимый размер ZIP.")
-                    await asyncio.to_thread(output.write, chunk)
-                    if time.monotonic() - last_heartbeat > 15:
-                        with db.session() as s:
-                            s.execute(
-                                update(Job)
-                                .where(Job.id == job_id)
-                                .values(updated=time.time())
-                            )
-                        last_heartbeat = time.monotonic()
-            if count < 4:
-                raise HTTPException(400, "Пустой архив.")
-            (root / "upload.part").rename(root / "input.zip")
-            with db.session() as s:
-                job = s.get(Job, job_id)
-                job.state, job.stage, job.upload_bytes, job.updated = (
-                    "queued",
-                    "В очереди",
-                    count,
-                    time.time(),
-                )
-            return {"id": job_id, "state": "queued"}
-        except BaseException:
-            (root / "upload.part").unlink(missing_ok=True)
-            with db.session() as s:
-                job = s.get(Job, job_id)
-                job.state, job.error, job.updated = (
-                    "failed",
-                    "Загрузка прервана или превышен лимит.",
-                    time.time(),
-                )
-            raise
+            payload = json.loads(raw)
+            if not isinstance(payload, dict) or set(payload) != {'filename', 'size', 'wrapped_key', 'nonce'}:
+                raise ValueError()
+            size = payload['size']
+            if type(size) is not int or size < 4:
+                raise ValueError()
+            if size > config.upload_limit:
+                raise HTTPException(413, 'Превышен допустимый размер ZIP.')
+            if not isinstance(payload['filename'], str) or len(payload['filename']) > 180:
+                raise ValueError()
+            filename = Path(payload['filename'].replace('\\', '/')).name
+            if not filename.lower().endswith('.zip') or any(ord(c) < 32 for c in filename):
+                raise ValueError()
+            transport.unb64(payload['nonce'], 8)
+            await asyncio.to_thread(transport.unwrap, app.state.transport_key, payload)
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(400, 'Некорректные параметры зашифрованного архива.')
+        job_id = new_id()
+        def allocate():
+            root = config.job_dir(user['id'], job_id)
+            try:
+                with db.session() as s:
+                    reserve(s, user, size)
+                    root.mkdir(parents=True)
+                    s.add(Job(id=job_id, user_id=user['id'], filename=filename,
+                              upload_envelope=json.dumps(payload)))
+            except BaseException:
+                if root.exists():
+                    shutil.rmtree(root)
+                raise
+        await asyncio.to_thread(allocate)
+        return dict(id=job_id, state='uploading', chunk_size=transport.CHUNK_SIZE)
 
-    @app.get("/api/jobs/{job_id}")
+    @app.put('/api/jobs/{job_id}/upload/{index}')
+    async def upload_chunk(job_id: str, index: int, request: Request, user=Depends(identity)):
+        owned(job_id, user)
+        data = bytearray()
+        async for chunk in request.stream():
+            data.extend(chunk)
+            if len(data) > transport.CHUNK_SIZE + 16:
+                raise HTTPException(413, 'Превышен размер блока.')
+        def receive():
+            with db.session() as s:
+                job = s.scalar(select(Job).where(Job.id == job_id).with_for_update())
+                # Admin can view other uploads but cannot alter their transport.
+                if job.user_id != user['id'] or job.deleted_by_user_at is not None:
+                    raise HTTPException(404, 'Задание не найдено.')
+                if job.state != 'uploading' or not job.upload_envelope:
+                    raise HTTPException(409, 'Загрузка уже закрыта.')
+                envelope = json.loads(job.upload_envelope)
+                remaining = envelope['size'] - job.upload_bytes
+                if index < 0 or index != job.upload_bytes // transport.CHUNK_SIZE or remaining <= 0:
+                    raise HTTPException(409, 'Неверный порядок блоков.')
+                expected = min(transport.CHUNK_SIZE, remaining)
+                if len(data) != expected + 16:
+                    raise HTTPException(400, 'Неверная длина блока.')
+                try:
+                    plain = transport.decrypt_chunk(app.state.transport_key, envelope, job_id, index, bytes(data))
+                except (InvalidTag, ValueError):
+                    raise HTTPException(400, 'Проверка целостности зашифрованного блока не пройдена.')
+                path = config.job_dir(job.user_id, job.id) / 'upload.part'
+                with path.open('r+b' if path.exists() else 'w+b') as output:
+                    output.seek(0, 2)
+                    if output.tell() < job.upload_bytes:
+                        raise HTTPException(409, 'Загрузка повреждена. Загрузите архив заново.')
+                    output.truncate(job.upload_bytes)  # Recover a write before a failed DB commit.
+                    output.seek(job.upload_bytes)
+                    output.write(plain)
+                    output.flush()
+                    os.fsync(output.fileno())
+                job.upload_bytes += len(plain)
+                job.updated = time.time()
+                job.progress = min(99, int(100 * job.upload_bytes / envelope['size']))
+                return dict(received=job.upload_bytes)
+        return await asyncio.to_thread(receive)
+
+    @app.post('/api/jobs/{job_id}/complete', status_code=201)
+    def complete_upload(job_id: str, user=Depends(identity)):
+        owned(job_id, user)
+        with db.session() as s:
+            job = s.scalar(select(Job).where(Job.id == job_id).with_for_update())
+            if job.user_id != user['id'] or job.deleted_by_user_at is not None:
+                raise HTTPException(404, 'Задание не найдено.')
+            if job.state != 'uploading' or not job.upload_envelope:
+                raise HTTPException(409, 'Загрузка уже закрыта.')
+            if job.upload_bytes != json.loads(job.upload_envelope)['size']:
+                raise HTTPException(409, 'Получены не все блоки архива.')
+            root = config.job_dir(job.user_id, job.id)
+            part, source = root / 'upload.part', root / 'input.zip'
+            # A crash after rename but before DB commit is safe to retry.
+            path = part if part.exists() else source
+            if not path.exists() or path.stat().st_size != job.upload_bytes:
+                raise HTTPException(409, 'Загрузка повреждена. Загрузите архив заново.')
+            with path.open('rb') as inp:
+                if inp.read(4) != b'PK\x03\x04':
+                    raise HTTPException(400, 'Полученный файл не является ZIP-архивом.')
+            if path == part:
+                part.replace(source)
+            job.state, job.stage, job.progress = 'queued', 'В очереди', 0
+            job.upload_envelope, job.updated = None, time.time()
+        return dict(id=job_id, state='queued')
+
+    @app.get('/api/jobs/{job_id}')
     def get_job(job_id: str, user=Depends(identity)):
-        return job_json(owned(job_id, user))
+        job = owned(job_id, user)
+        with db.session() as s:
+            return job_json(job, s.get(User, job.user_id) if user['username'] == 'admin' else None, config)
 
-    @app.post("/api/jobs/{job_id}/cancel")
+    @app.post('/api/jobs/{job_id}/cancel')
     def cancel(job_id: str, user=Depends(identity)):
         owned(job_id, user)
         with db.session() as s:
-            job = s.get(Job, job_id)
-            if job.state in ("queued", "running"):
+            job = s.scalar(select(Job).where(Job.id == job_id).with_for_update())
+            if job.state in ('queued', 'running', 'uploading'):
                 job.cancelled = True
-                if job.state == "queued":
-                    job.state, job.stage = "cancelled", "Отменено"
-            return {"ok": True}
+                if job.state in ('queued', 'uploading'):
+                    job.state, job.stage = 'cancelled', 'Отменено'
+            return dict(ok=True)
 
-    @app.delete("/api/jobs/{job_id}")
+    @app.delete('/api/jobs/{job_id}')
     def delete_job(job_id: str, user=Depends(identity)):
         owned(job_id, user)
         with db.session() as s:
             job = s.scalar(select(Job).where(Job.id == job_id).with_for_update())
-            if job is None:
-                raise HTTPException(404, "Задание не найдено.")
-            if job.state not in TERMINAL:
-                raise HTTPException(
-                    409, "Сначала дождитесь окончания или отмены задания."
-                )
-            job.state = "deleting"
-        root = config.job_dir(user["id"], job_id)
+            if user['username'] != 'admin':
+                if job.user_id != user['id'] or job.deleted_by_user_at is not None:
+                    raise HTTPException(404, 'Задание не найдено.')
+                job.deleted_by_user_at, job.updated = time.time(), time.time()
+                return dict(ok=True, hidden=True)
+            if job.archived_at:
+                return dict(ok=True, archived=True)
+            if job.state not in TERMINAL | {'deleting'}:
+                raise HTTPException(409, 'Сначала дождитесь окончания или отмены задания.')
+            job.state, job.stage = 'deleting', 'Архивирование'
+        # Commit the barrier before touching files; worker cannot claim this job.
+        # Hold the row lock through cleanup to serialize concurrent admin requests.
         try:
-            if root.exists():
-                shutil.rmtree(root)
-        except OSError:
             with db.session() as s:
-                job = s.get(Job, job_id)
-                job.state, job.error = (
-                    "failed",
-                    "Не удалось удалить файлы. Повторите удаление или обратитесь к администратору.",
-                )
-            raise HTTPException(500, "Не удалось удалить файлы задания.")
+                job = s.scalar(select(Job).where(Job.id == job_id).with_for_update())
+                if not job.archived_at:
+                    archive_study(config, job)
+                    job.state, job.stage, job.progress = 'archived', 'В архиве', 0
+                    job.archived_at, job.updated = time.time(), time.time()
+                    job.upload_envelope, job.error = None, None
+        except OSError:
+            log.exception('Study archival failed for %s', job_id)
+            raise HTTPException(500, 'Не удалось завершить архивирование. Проверьте исходный ZIP и свободное место, затем повторите операцию.')
+        return dict(ok=True, archived=True)
+
+    @app.get('/api/jobs/{job_id}/archive')
+    def download_archive(job_id: str, admin=Depends(administrator)):
+        job = owned(job_id, admin)
+        folder = (config.archive_dir(job.user_id, job.id) if job.archived_at
+                  else config.job_dir(job.user_id, job.id))
+        return FileResponse(private_file(folder, 'input.zip'), media_type='application/zip', filename=job.filename)
+
+    @app.post('/api/jobs/{job_id}/reprocess', status_code=201)
+    def reprocess(job_id: str, admin=Depends(administrator)):
+        # The original owner remains unchanged. A separate new admin-owned study
+        # avoids silently restoring a deleted user's study in their workspace.
         with db.session() as s:
-            s.delete(s.get(Job, job_id))
-        return {"ok": True}
+            reserve(s, admin, 0)
+            job = s.scalar(select(Job).where(Job.id == job_id).with_for_update())
+            if job is None:
+                raise HTTPException(404, 'Задание не найдено.')
+            if job.state not in TERMINAL | {'archived'}:
+                raise HTTPException(409, 'Дождитесь окончания обработки.')
+            folder = (config.archive_dir(job.user_id, job.id) if job.archived_at
+                      else config.job_dir(job.user_id, job.id))
+            source = private_file(folder, 'input.zip')
+            reserve_size = source.stat().st_size
+            if bytes_used(config.data / 'users' / admin['id']) + reserve_size > config.max_user_bytes:
+                raise HTTPException(409, 'Недостаточно места для повторного анализа.')
+            new_job = Job(id=new_id(), user_id=admin['id'], filename=job.filename,
+                source_job_id=job.id, state='queued', stage='В очереди', upload_bytes=reserve_size)
+            root = config.job_dir(admin['id'], new_job.id)
+            root.mkdir(parents=True)
+            try:
+                shutil.copyfile(source, root / 'input.zip')
+                s.add(new_job)
+                s.flush()
+            except BaseException:
+                shutil.rmtree(root)
+                raise
+            return dict(id=new_job.id, state='queued')
 
     @app.get("/api/jobs/{job_id}/result")
     def get_result(job_id: str, user=Depends(identity)):

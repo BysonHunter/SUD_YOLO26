@@ -10,6 +10,9 @@ x-runtime: &runtime
   SUD_MAX_ACTIVE_JOBS: ${SUD_MAX_ACTIVE_JOBS:-3}
   SUD_MAX_SAVED_JOBS: ${SUD_MAX_SAVED_JOBS:-30}
   SUD_JOB_TIMEOUT: ${SUD_JOB_TIMEOUT:-3600}
+  SUD_REGISTRATION_ENABLED: ${SUD_REGISTRATION_ENABLED:-true}
+  SUD_PRIVACY_POLICY_URL: ${SUD_PRIVACY_POLICY_URL:-}
+  SUD_CONSENT_TEXT: ${SUD_CONSENT_TEXT:-Даю согласие на обработку моего имени пользователя и адреса электронной почты для создания и обслуживания учётной записи в SUD YOLO26.}
 services:
   database:
     image: postgres:17-bookworm

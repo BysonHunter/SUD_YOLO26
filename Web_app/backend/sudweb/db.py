@@ -36,6 +36,11 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     deleted_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True, unique=True)
+    consent_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    consent_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    consent_policy_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    consent_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class LoginSession(Base):
@@ -68,6 +73,10 @@ class Job(Base):
     cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
     upload_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_by_user_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    archived_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    upload_envelope: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Database:
@@ -97,6 +106,18 @@ class Database:
         with self.engine.begin() as connection:
             if 'deleted_at' not in {c['name'] for c in inspect(connection).get_columns('users')}:
                 connection.execute(text('ALTER TABLE users ADD COLUMN deleted_at FLOAT'))
+            user_columns = {c['name'] for c in inspect(connection).get_columns('users')}
+            for name, kind in [('email','VARCHAR(254)'),
+                ('consent_at','FLOAT'),
+                ('consent_text','TEXT'), ('consent_policy_url','TEXT'), ('consent_version','VARCHAR(64)')]:
+                if name not in user_columns:
+                    connection.execute(text(f'ALTER TABLE users ADD COLUMN {name} {kind}'))
+            connection.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email)'))
+            columns = {c['name'] for c in inspect(connection).get_columns('jobs')}
+            for name, kind in [('deleted_by_user_at', 'FLOAT'), ('archived_at', 'FLOAT'),
+                               ('source_job_id', 'VARCHAR(36)'), ('upload_envelope', 'TEXT')]:
+                if name not in columns:
+                    connection.execute(text(f'ALTER TABLE jobs ADD COLUMN {name} {kind}'))
 
     @contextmanager
     def session(self):

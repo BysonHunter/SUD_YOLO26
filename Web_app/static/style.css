@@ -442,6 +442,19 @@ td button:hover,td button:focus{
   display:grid;
   gap:14px
 }
+.consent-check{
+  align-items:flex-start;
+  line-height:1.5;
+  font-size:.85rem
+}
+.consent-check input{
+  flex-shrink:0;
+  margin-top:4px
+}
+#register-dialog{
+  max-height:92vh;
+  overflow-y:auto
+}
 .user-form h2,.users-heading h2{
   margin:0
 }

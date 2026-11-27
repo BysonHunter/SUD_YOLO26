@@ -18,6 +18,7 @@ def main():
         f"SUD_BOOTSTRAP_PASSWORD={password}\n"
         "SUD_BIND=127.0.0.1\nSUD_PORT=8080\n"
         "SUD_PUBLIC_ORIGIN=http://localhost:8080\nSUD_SECURE_COOKIE=false\n"
+        "SUD_REGISTRATION_ENABLED=true\nSUD_PRIVACY_POLICY_URL=\n"
     )
     descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:

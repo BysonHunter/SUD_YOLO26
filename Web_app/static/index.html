@@ -1,14 +1,28 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SUD · YOLO26</title><link rel="stylesheet" href="/static/style.css">
-<script src="/assets/plotly.min.js" defer></script><script src="/static/app.js" defer></script></head>
+<script src="/assets/plotly.min.js" defer></script><script src="/static/encrypted-upload.js" defer></script><script src="/static/app.js" defer></script></head>
 <body>
 <section id="login" class="login"><form id="login-form" class="card login-card">
 <div class="brand-mark">S</div><h1>SUD <span>YOLO26</span></h1><p class="muted">Анализ КТ мочевыделительной системы</p>
 <label>Логин<input id="username" autocomplete="username" required maxlength="80"></label>
 <label>Пароль<input id="password" type="password" autocomplete="current-password" required maxlength="128"></label>
 <button class="primary" type="submit">Войти в систему →</button><p id="login-error" role="alert"></p>
-<small class="muted">Учётную запись предоставляет администратор сервера.</small></form></section>
+<button id="open-register" type="button">Первый вход? Создать учётную запись</button>
+<small class="muted">Войдите по имени пользователя или зарегистрируйтесь самостоятельно.</small></form></section>
+<dialog id="register-dialog" aria-labelledby="register-title"><form id="register-form" class="user-form">
+<div><p class="eyebrow">ПЕРВЫЙ ВХОД</p><h2 id="register-title">Создать учётную запись</h2></div>
+<label>Имя пользователя<input id="register-username" autocomplete="username" required minlength="3" maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9_.@\-]{2,79}"></label>
+<small>Имя для входа: 3–80 латинских букв, цифр или символов _.@-. Регистр не учитывается.</small>
+<label>Электронная почта<input id="register-email" type="email" autocomplete="email" required maxlength="254"></label>
+<label>Пароль<input id="register-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+<label>Повторите пароль<input id="register-password-repeat" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+<small>От 12 до 128 символов. Пароль задаётся вами, письма не отправляются.</small>
+<label class="check consent-check"><input id="register-consent" type="checkbox" required><span id="register-consent-text"></span></label>
+<a id="privacy-link" target="_blank" rel="noopener noreferrer" hidden>Политика обработки персональных данных ↗</a>
+<p id="register-message" class="form-message error" role="alert" hidden></p>
+<div class="dialog-actions"><button id="cancel-register" type="button">Отмена</button><button id="submit-register" class="primary" type="submit">Зарегистрироваться</button></div>
+</form></dialog>
 <div id="workspace" hidden>
 <aside><div class="logo"><div class="brand-mark">S</div><strong>SUD <span>YOLO26</span></strong></div>
 <p class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</p><nav>
@@ -24,7 +38,9 @@
 <section id="studies" class="view">
 <div class="card upload-card"><div><p class="eyebrow">НОВОЕ ИССЛЕДОВАНИЕ</p><h2>Загрузите архив DICOM</h2><p class="muted">Сохраните структуру каталогов и DICOMDIR, если он есть. Подготовка проекций, детекция и расчёт выполняются автоматически.</p></div>
 <label class="drop" id="drop">Выбрать ZIP-архив<input id="archive" type="file" accept=".zip,application/zip"><small id="upload-limit"></small></label><progress id="upload-progress" max="100" value="0" hidden></progress></div>
-<div class="section-head"><h2>Мои исследования</h2><button id="refresh">Обновить</button></div><div id="jobs" class="job-list"></div>
+<div class="section-head"><h2 id="jobs-heading">Мои исследования</h2><button id="refresh">Обновить</button></div>
+<div id="admin-study-filters" class="toolbar" hidden><label>Владелец<input id="job-owner-filter" type="search" placeholder="Логин пользователя"></label><label>Показывать<select id="job-status-filter"><option value="all">Все исследования</option><option value="active">Текущие</option><option value="deleted">Удалено пользователем</option><option value="archived">В архиве</option></select></label></div>
+<p id="study-policy" class="muted">Удаление скрывает исследование из вашего списка. Администратор сохраняет доступ к результатам и исходному архиву.</p><div id="jobs" class="job-list"></div><button id="more-jobs" type="button" hidden>Показать ещё</button>
 </section>
 <section id="images" class="view" hidden><div class="card"><div class="toolbar"><label>Проекция<select id="projection"><option value="coronal">Корональная</option><option value="axial">Аксиальная</option></select></label>
 <label class="check"><input id="annotated" type="checkbox" checked> Детекции</label><label class="check"><input id="grid" type="checkbox" checked> Сетка, мм</label><label class="check"><input id="only-detected" type="checkbox"> Только с детекциями</label>

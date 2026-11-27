@@ -60,6 +60,7 @@ async function api(path, options = {}) {
 }
 
 function loggedOut() {
+  state.uploadAbort?.abort();
   state.epoch++;
   state.modelEpoch++;
   state.imageEpoch++;
@@ -79,6 +80,9 @@ function loggedOut() {
   state.job = null;
   state.jobs = [];
   state.jobsSignature = '';
+  state.jobLimit = 100;
+  $('job-owner-filter').value = '';
+  $('job-status-filter').value = 'all';
   image = null;
   records = [];
   for (const id of ['jobs', 'metrics', 'previews', 'laser-table', 'legend', 'series']) $(id).replaceChildren();
@@ -95,10 +99,70 @@ function loggedOut() {
   clearInterval(poll);
 }
 let poll;
+let registrationInfo;
+$('open-register').onclick = async () => {
+  const message = $('register-message');
+  $('register-form').reset();
+  message.hidden = true;
+  $('submit-register').disabled = true;
+  $('register-consent-text').textContent = '';
+  $('privacy-link').hidden = true;
+  $('register-dialog').showModal();
+  try {
+    registrationInfo = await api('/registration');
+    if (!registrationInfo.enabled) throw Error('Регистрация отключена. Обратитесь к администратору.');
+    $('register-consent-text').textContent = registrationInfo.consent_text;
+    if (registrationInfo.policy_url) {
+      $('privacy-link').href = registrationInfo.policy_url;
+      $('privacy-link').hidden = false;
+    }
+    $('submit-register').disabled = false;
+  } catch (error) {
+    message.textContent = error.message;
+    message.hidden = false;
+  }
+};
+$('cancel-register').onclick = () => $('register-dialog').close();
+$('register-dialog').onclose = () => { $('register-form').reset(); registrationInfo = null; };
+$('register-form').onsubmit = async event => {
+  event.preventDefault();
+  if (!registrationInfo?.enabled) return;
+  const message = $('register-message');
+  message.hidden = true;
+  if ($('register-password').value !== $('register-password-repeat').value) {
+    message.textContent = 'Пароли не совпадают.';
+    message.hidden = false;
+    return;
+  }
+  $('submit-register').disabled = true;
+  $('cancel-register').disabled = true;
+  try {
+    const user = await api('/register', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:$('register-username').value, email:$('register-email').value,
+        password:$('register-password').value, consent:$('register-consent').checked,
+        consent_version:registrationInfo.consent_version})});
+    $('register-dialog').close();
+    $('username').value = user.username;
+    $('login-error').textContent = 'Учётная запись создана. Введите заданный вами пароль для входа.';
+    $('password').focus();
+  } catch (error) {
+    message.textContent = error.message;
+    message.hidden = false;
+  } finally {
+    $('submit-register').disabled = !registrationInfo?.enabled;
+    $('cancel-register').disabled = false;
+  }
+};
 async function loggedIn(user) {
   state.csrf = user.csrf;
   state.isAdmin = user.is_admin === true;
   $('users-nav').hidden = !state.isAdmin;
+  $('admin-study-filters').hidden = !state.isAdmin;
+  $('jobs-heading').textContent = state.isAdmin ? 'Все исследования пользователей' : 'Мои исследования';
+  $('study-policy').textContent = state.isAdmin
+    ? 'Удаление результатов переносит исходный ZIP в архив. Архив можно скачать или отправить на повторный анализ; исходный владелец сохраняется в записи.'
+    : 'Удаление скрывает исследование из вашего списка. Администратор сохраняет доступ к результатам и исходному архиву.';
+  state.uploadLimit = user.upload_limit || 2147483648;
   $('account').textContent = user.username;
   $('login').hidden = true;
   $('workspace').hidden = false;
@@ -184,6 +248,7 @@ async function refreshUsers() {
   for (const user of users) {
     const row = el('tr'), name = el('td'), status = el('td'), actions = el('td');
     name.append(el('strong', user.username), el('small', user.is_admin ? 'Администратор' : 'Пользователь'));
+    if (user.email) name.append(el('small', user.email));
     status.append(el('span', user.enabled ? 'Активен' : 'Отключён', 'user-status' + (user.enabled ? '' : ' inactive')));
     if (user.is_admin) {
       actions.append(el('span', 'Защищён', 'muted'));
@@ -290,8 +355,15 @@ $('confirm-delete-user').onclick = async () => {
 
 async function refresh() {
   const auth = state.csrf;
-  const jobs = await api('/jobs');
+  const jobs = [];
+  const limit = state.jobLimit || 100;
+  while (jobs.length < limit) {
+    const batch = await api('/jobs?offset=' + jobs.length + '&limit=' + Math.min(100, limit - jobs.length));
+    jobs.push(...batch);
+    if (batch.length < 100) break;
+  }
   if (auth !== state.csrf) return;
+  $('more-jobs').hidden = jobs.length < limit;
   const signature = JSON.stringify(jobs.map(({
     updated,
     ...rest
@@ -299,15 +371,28 @@ async function refresh() {
   if (signature === state.jobsSignature) return;
   state.jobsSignature = signature;
   state.jobs = jobs;
+  renderJobs();
+}
+function renderJobs() {
   const list = $('jobs');
   list.replaceChildren();
-  if (!jobs.length) list.append(el('p', 'Здесь появятся ваши исследования. Загрузите первый архив.', 'muted'));
+  const owner = $('job-owner-filter').value.trim().toLowerCase();
+  const filter = $('job-status-filter').value;
+  const jobs = state.jobs.filter(j => !state.isAdmin || (
+    (!owner || j.owner?.toLowerCase().includes(owner)) &&
+    (filter === 'all' || (filter === 'deleted' && j.deleted_by_user_at && !j.archived_at) ||
+     (filter === 'archived' && j.archived_at) || (filter === 'active' && !j.deleted_by_user_at && !j.archived_at))));
+  if (!jobs.length) list.append(el('p', 'Исследования не найдены.', 'muted'));
   for (const job of jobs) {
     const row = el('article', undefined, 'card job'),
       name = el('div');
     name.append(el('strong', job.filename), el('small', new Date(job.created * 1000).toLocaleString('ru-RU')));
+    if (state.isAdmin) name.append(el('small', 'Владелец: ' + job.owner + (job.owner_deleted ? ' · учётная запись удалена' : '')));
+    if (job.source_job_id) name.append(el('small', 'Повторный анализ · источник: ' + job.source_job_id));
     const status = el('div');
-    status.append(el('span', job.stage));
+    status.append(el('span', job.display_status));
+    if (job.deleted_by_user_at && !job.archived_at) status.append(el('small', job.stage));
+    if (job.archived_at && job.deleted_by_user_at) status.append(el('small', 'Ранее удалено пользователем'));
     if (['queued', 'running', 'uploading'].includes(job.state)) {
       const p = el('progress');
       p.max = 100;
@@ -331,14 +416,25 @@ async function refresh() {
       actions.append(b);
     };
     if (job.state === 'completed') button('Открыть →', () => openJob(job.id));
-    if (['running', 'queued'].includes(job.state)) button('Отменить', async () => {
+    if (['running', 'queued', 'uploading'].includes(job.state)) button('Отменить', async () => {
       await api('/jobs/' + job.id + '/cancel', {
         method: 'POST'
       });
       await refresh();
     });
-    if (['completed', 'failed', 'cancelled'].includes(job.state)) button('Удалить', async () => {
-      if (!confirm('Удалить архив и все результаты этого исследования?')) return;
+    if (state.isAdmin && ['completed', 'failed', 'cancelled', 'archived'].includes(job.state) && job.archive_available) {
+      const download = el('a', 'Скачать исходный ZIP', 'button');
+      download.href = '/api/jobs/' + job.id + '/archive';
+      actions.append(download);
+      button('Повторить анализ', async () => {
+        if (!confirm('Создать отдельное исследование администратора из этого ZIP?')) return;
+        await api('/jobs/' + job.id + '/reprocess', {method: 'POST'});
+        await refresh();
+      });
+    }
+    if ((!state.isAdmin && !['archived', 'deleting'].includes(job.state)) ||
+        (state.isAdmin && ['completed', 'failed', 'cancelled', 'deleting'].includes(job.state))) button(state.isAdmin ? 'Удалить результаты → в архив' : 'Удалить', async () => {
+      if (!confirm(state.isAdmin ? 'Удалить результаты и распакованные DICOM? Исходный ZIP сохранится в архиве администратора.' : 'Скрыть исследование из вашего списка? Администратор сохранит доступ к нему.')) return;
       await api('/jobs/' + job.id, {
         method: 'DELETE'
       });
@@ -357,6 +453,9 @@ async function refresh() {
     list.append(row);
   }
 }
+$('job-owner-filter').oninput = renderJobs;
+$('job-status-filter').onchange = renderJobs;
+$('more-jobs').onclick = () => { state.jobLimit = (state.jobLimit || 100) + 100; refresh().catch(e => notice(e.message)); };
 $('refresh').onclick = () => refresh().catch(e => notice(e.message));
 async function upload(file) {
   if (!file) return;
@@ -364,6 +463,13 @@ async function upload(file) {
     notice('Выберите ZIP-архив.');
     return;
   }
+  if (file.size > state.uploadLimit || file.name.length > 180) {
+    notice('Превышен размер ZIP или длина имени файла (до 180 символов).');
+    return;
+  }
+  const auth = state.csrf;
+  const controller = new AbortController();
+  state.uploadAbort = controller;
   const input = $('archive'),
     progress = $('upload-progress');
   input.disabled = true;
@@ -371,36 +477,24 @@ async function upload(file) {
   progress.value = 0;
   notice('');
   try {
-    await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/jobs');
-      xhr.setRequestHeader('Content-Type', 'application/zip');
-      xhr.setRequestHeader('X-CSRF-Token', state.csrf);
-      xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
-      xhr.upload.onprogress = e => {
-        if (e.lengthComputable) progress.value = e.loaded / e.total * 100;
-      };
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve();
-        else {
-          let message = 'Ошибка загрузки';
-          try {
-            message = JSON.parse(xhr.responseText).detail;
-          } catch {}
-          reject(Error(message));
-        }
-      };
-      xhr.onerror = () => reject(Error('Соединение прервано. Проверьте список заданий перед повторной загрузкой.'));
-      xhr.send(file);
+    notice('Шифрование и защищённая передача архива…');
+    await window.sudEncryptedUpload(file, {
+      api: (path, options) => {
+        if (auth !== state.csrf) throw Error('Сеанс изменён. Загрузка остановлена.');
+        return api(path, options);
+      },
+      signal: controller.signal,
+      progress: value => { progress.value = value; }
     });
     notice('Архив принят. Ход обработки отображается в списке исследований.');
     await refresh();
   } catch (e) {
-    notice(e.message);
+    if (auth === state.csrf) notice(e.message);
   } finally {
     input.disabled = false;
     input.value = '';
     progress.hidden = true;
+    if (state.uploadAbort === controller) state.uploadAbort = null;
   }
 }
 $('archive').onchange = e => upload(e.target.files[0]);

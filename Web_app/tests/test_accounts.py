@@ -112,7 +112,7 @@ class AccountTests(unittest.TestCase):
             self.assertIsNotNone(s.get(Job,job_id))
             self.assertEqual(s.scalars(select(LoginSession).where(LoginSession.user_id==self.alice['id'])).all(),[])
         self.assertEqual(source.read_bytes(),b'original private data')
-        self.assertEqual(self.client.get('/api/jobs/'+job_id).status_code,404)
+        self.assertEqual(self.client.get('/api/jobs/'+job_id).status_code,200)
 
     def test_admin_cannot_delete_itself_and_missing_user_is_404(self):
         headers={'X-CSRF-Token':self.admin_csrf}
