@@ -41,6 +41,14 @@ class User(Base):
     consent_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     consent_policy_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     consent_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    password_reset_required: Mapped[bool] = mapped_column(Boolean, default=False, server_default='false')
+
+
+class PasswordReset(Base):
+    __tablename__ = 'password_resets'
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    expires: Mapped[float] = mapped_column(Float)
 
 
 class LoginSession(Base):
@@ -108,6 +116,7 @@ class Database:
                 connection.execute(text('ALTER TABLE users ADD COLUMN deleted_at FLOAT'))
             user_columns = {c['name'] for c in inspect(connection).get_columns('users')}
             for name, kind in [('email','VARCHAR(254)'),
+                ('password_reset_required', 'BOOLEAN NOT NULL DEFAULT false'),
                 ('consent_at','FLOAT'),
                 ('consent_text','TEXT'), ('consent_policy_url','TEXT'), ('consent_version','VARCHAR(64)')]:
                 if name not in user_columns:

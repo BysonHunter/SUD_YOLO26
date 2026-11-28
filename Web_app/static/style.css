@@ -570,6 +570,9 @@ dialog::backdrop{
     grid-column:1/-1
   }
 }
+.users-table td:last-child button{margin:3px;white-space:normal}
+#admin-reset-result{padding:14px;border:1px solid #bddddd;border-radius:10px;background:#f1f9f9}
+#admin-reset-result input{width:100%;min-width:0}
 @media(max-width:680px){
   aside{
     position:static;

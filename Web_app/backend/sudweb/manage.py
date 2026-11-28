@@ -16,22 +16,25 @@ class UserExists(ValueError):
     pass
 
 
-def create_user(db, username, password, replace=False):
+def create_user(db, username, password, replace=False, email=None):
     username = username.strip().lower()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.@-]{2,79}", username):
         raise ValueError("Логин: от 3 до 80 латинских букв, цифр или символов _.@-")
     hashed = password_hash(password)
     with db.session() as s:
-        user = s.scalar(select(User).where(User.username == username))
+        user = s.scalar(select(User).where(User.username == username).with_for_update())
         if user:
             if user.deleted_at is not None:
                 raise UserExists('Этот логин принадлежит удалённой учётной записи. Выберите другой логин.')
             if not replace:
                 raise UserExists("Такой пользователь уже существует.")
             user.password_hash, user.enabled = hashed, True
+            user.password_reset_required = False
+            from .recovery import invalidate
+            invalidate(s, user.id)
             s.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
         else:
-            user = User(username=username, password_hash=hashed)
+            user = User(username=username, password_hash=hashed, email=email)
             s.add(user)
         s.flush()
         return dict(id=user.id, username=user.username, enabled=user.enabled)

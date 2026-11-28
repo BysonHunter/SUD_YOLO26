@@ -12,7 +12,7 @@ import time
 import os
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request, HTTPException, Depends, Query
+from fastapi import FastAPI, Request, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, func, update, delete
@@ -26,6 +26,7 @@ from .manage import create_user, UserExists
 from . import transport
 from .studies import archive_study
 from . import registration
+from . import recovery
 from cryptography.exceptions import InvalidTag
 
 log = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ def bytes_used(root):
     return total
 
 
-async def account_payload(request, fields):
+async def account_payload(request, fields, optional=frozenset()):
     raw = bytearray()
     async for chunk in request.stream():
         raw.extend(chunk)
@@ -129,7 +130,7 @@ async def account_payload(request, fields):
         payload = json.loads(raw)
     except ValueError:
         raise HTTPException(400, 'Некорректные данные учётной записи.')
-    if (not isinstance(payload, dict) or set(payload) != fields
+    if (not isinstance(payload, dict) or not fields <= set(payload) or set(payload) - fields - optional
             or not all(isinstance(payload[k], str) for k in payload)):
         raise HTTPException(400, 'Проверьте заполнение полей учётной записи.')
     return payload
@@ -197,7 +198,7 @@ def create_app(settings=None, database=None):
                 if session and session.expires > time.time()
                 else None
             )
-            if user is None or not user.enabled or user.deleted_at is not None:
+            if user is None or not user.enabled or user.deleted_at is not None or user.password_reset_required:
                 raise HTTPException(401, "Войдите в систему.")
             if request.method not in ("GET", "HEAD") and not hmac.compare_digest(
                 request.headers.get("x-csrf-token", ""), session.csrf
@@ -317,6 +318,9 @@ def create_app(settings=None, database=None):
             valid = password_matches(password, stored)
             if not user or not user.enabled or user.deleted_at is not None or not valid:
                 raise HTTPException(401, "Неверный логин или пароль.")
+            if user.password_reset_required:
+                return JSONResponse(dict(detail='Администратор сбросил пароль. Создайте новый пароль по одноразовой ссылке или запросите её по email.',
+                    reset_required=True), status_code=403)
             s.execute(
                 update(LoginAttempt).where(LoginAttempt.key == keys[0]).values(count=0)
             )
@@ -348,6 +352,33 @@ def create_app(settings=None, database=None):
 
     app.state.dummy_password = password_hash(secrets.token_hex(20))
 
+    @app.post('/api/password/forgot', status_code=202)
+    async def forgot_password(request: Request, tasks: BackgroundTasks):
+        payload = await account_payload(request, {'email'})
+        if not recovery.mail_ready(config):
+            raise HTTPException(503, 'Восстановление по email пока не настроено. Обратитесь к администратору.')
+        try:
+            email = recovery.email_address(payload['email'])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        peer = request.client.host if request.client else 'unknown'
+        allowed = await asyncio.to_thread(recovery.rate_limit, db, peer, email)
+        # Same response for an unknown address and a limited address: no user enumeration.
+        if allowed:
+            tasks.add_task(recovery.request_email, db, config, email)
+        return dict(message=recovery.GENERIC)
+
+    @app.post('/api/password/reset')
+    async def reset_password(request: Request):
+        payload = await account_payload(request, {'token', 'password'})
+        peer = request.client.host if request.client else 'unknown'
+        if not await asyncio.to_thread(recovery.rate_limit, db, peer, '', 'complete'):
+            raise HTTPException(429, 'Слишком много попыток. Повторите через час.')
+        try:
+            return await asyncio.to_thread(recovery.complete, db, payload['token'], payload['password'])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
     @app.get("/api/me")
     def me(user=Depends(identity)):
         return {
@@ -366,23 +397,72 @@ def create_app(settings=None, database=None):
                 .group_by(User.id).order_by(User.username))
             return [dict(id=user.id, username=user.username, enabled=user.enabled,
                          email=user.email, consent_at=user.consent_at,
+                         reset_required=user.password_reset_required,
                          is_admin=user.username == 'admin', studies=count)
                     for user, count in rows]
 
     @app.post('/api/admin/users', status_code=201)
     async def add_user(request: Request, admin=Depends(administrator)):
-        payload = await account_payload(request, {'username', 'password'})
+        payload = await account_payload(request, {'username', 'password'}, {'email'})
         if len(payload['username']) > 80 or len(payload['password']) > 128:
             raise HTTPException(400, 'Логин — до 80 символов, пароль — от 12 до 128 символов.')
         try:
-            return await asyncio.to_thread(create_user, db, payload['username'], payload['password'])
+            email = recovery.email_address(payload['email']) if payload.get('email') else None
+            return await asyncio.to_thread(create_user, db, payload['username'], payload['password'], email=email)
         except UserExists as exc:
             raise HTTPException(409, str(exc))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         except IntegrityError:
             # Concurrent requests can pass the initial lookup together.
-            raise HTTPException(409, 'Такой пользователь уже существует.')
+            raise HTTPException(409, 'Такой пользователь или email уже существует.')
+
+    @app.patch('/api/admin/users/{user_id}/email')
+    async def set_user_email(user_id: str, request: Request, admin=Depends(administrator)):
+        payload = await account_payload(request, {'email'})
+        try:
+            email = recovery.email_address(payload['email'])
+            def save():
+                with db.session() as s:
+                    user = s.scalar(select(User).where(User.id == user_id).with_for_update())
+                    if user is None or user.deleted_at is not None:
+                        raise HTTPException(404, 'Пользователь не найден.')
+                    if user.email != email:
+                        user.email = email
+                        recovery.invalidate(s, user.id)
+                return dict(ok=True)
+            return await asyncio.to_thread(save)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except IntegrityError:
+            raise HTTPException(409, 'Этот email уже используется.')
+
+    @app.post('/api/admin/users/{user_id}/reset-password')
+    def admin_reset_password(user_id: str, admin=Depends(administrator)):
+        try:
+            with db.session() as s:
+                user = s.scalar(select(User).where(User.id == user_id).with_for_update())
+                if user is None or user.deleted_at is not None:
+                    raise HTTPException(404, 'Пользователь не найден.')
+                if user.username == 'admin' or user.id == admin['id']:
+                    raise HTTPException(409, 'Для своей учётной записи используйте смену пароля или восстановление по email.')
+                if not user.enabled:
+                    raise HTTPException(409, 'Учётная запись отключена.')
+                link = recovery.issue(s, user, config)
+                user.password_reset_required = True
+                s.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
+                email = user.email
+        except ValueError as exc:
+            raise HTTPException(503, str(exc))
+        sent = False
+        if email and recovery.mail_ready(config):
+            try:
+                recovery.send(config, email, link)
+                sent = True
+            except Exception:
+                log.warning('Admin password reset email could not be delivered; check SMTP configuration.')
+        # Only authenticated admin receives the fallback link, never a public caller.
+        return dict(ok=True, email_sent=sent, reset_link=link, expires_in=recovery.TOKEN_SECONDS)
 
     @app.delete('/api/admin/users/{user_id}')
     def remove_user(user_id: str, admin=Depends(administrator)):
@@ -395,6 +475,7 @@ def create_app(settings=None, database=None):
             # Keep the owner UUID and studies, so account removal never deletes
             # patient data or allows a new account to inherit the old studies.
             user.deleted_at, user.enabled = time.time(), False
+            recovery.invalidate(s, user.id)
             s.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
         return dict(ok=True, studies_preserved=True)
 
@@ -403,7 +484,7 @@ def create_app(settings=None, database=None):
             raise HTTPException(400, 'Пароль должен содержать от 12 до 128 символов.')
         with db.session() as s:
             account = s.scalar(select(User).where(User.id == user['id']).with_for_update())
-            if account is None or not account.enabled or account.deleted_at is not None:
+            if account is None or not account.enabled or account.deleted_at is not None or account.password_reset_required:
                 raise HTTPException(401, 'Войдите в систему.')
             if not password_matches(payload['current_password'], account.password_hash):
                 raise HTTPException(400, 'Текущий пароль указан неверно.')
@@ -414,6 +495,7 @@ def create_app(settings=None, database=None):
             except ValueError as exc:
                 raise HTTPException(400, str(exc))
             # Rotate this session and revoke every other device in one transaction.
+            recovery.invalidate(s, account.id)
             s.execute(delete(LoginSession).where(LoginSession.user_id == account.id))
             return login_response(s, account)
 

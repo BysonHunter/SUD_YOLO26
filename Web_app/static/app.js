@@ -54,7 +54,9 @@ async function api(path, options = {}) {
   }
   if (!response.ok) {
     if (response.status === 401 && path !== '/login') loggedOut();
-    throw Error(typeof data.detail === 'string' ? data.detail : 'Ошибка запроса');
+    const error = Error(typeof data.detail === 'string' ? data.detail : 'Ошибка запроса');
+    error.resetRequired = data.reset_required === true;
+    throw error;
   }
   return data;
 }
@@ -75,6 +77,7 @@ function loggedOut() {
   $('user-form-message').hidden = true;
   $('delete-user-dialog').close();
   $('password-dialog').close();
+  $('admin-account-dialog').close();
   $('change-password-form').reset();
   state.result = null;
   state.job = null;
@@ -100,6 +103,59 @@ function loggedOut() {
 }
 let poll;
 let registrationInfo;
+let resetToken = '';
+let accountTarget;
+function formMessage(id, text, error = false) {
+  $(id).textContent = text;
+  $(id).hidden = !text;
+  $(id).classList.toggle('error', error);
+}
+$('open-forgot').onclick = () => {
+  $('forgot-form').reset();
+  formMessage('forgot-message', '');
+  $('forgot-dialog').showModal();
+};
+$('cancel-forgot').onclick = () => $('forgot-dialog').close();
+$('forgot-dialog').onclose = () => $('forgot-form').reset();
+$('forgot-form').onsubmit = async event => {
+  event.preventDefault();
+  $('submit-forgot').disabled = true;
+  formMessage('forgot-message', '');
+  try {
+    const result = await api('/password/forgot', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:$('forgot-email').value})});
+    formMessage('forgot-message', result.message);
+  } catch (error) { formMessage('forgot-message', error.message, true); }
+  finally { $('submit-forgot').disabled = false; }
+};
+function openResetLink() {
+  const value = new URLSearchParams(location.hash.slice(1)).get('reset');
+  if (!value) return;
+  resetToken = value;
+  history.replaceState(null, '', location.pathname + location.search);
+  $('reset-form').reset();
+  formMessage('reset-message', '');
+  if (!$('reset-dialog').open) $('reset-dialog').showModal();
+}
+window.addEventListener('hashchange', openResetLink);
+$('cancel-reset').onclick = () => $('reset-dialog').close();
+$('reset-dialog').onclose = () => { resetToken = ''; $('reset-form').reset(); };
+$('reset-form').onsubmit = async event => {
+  event.preventDefault();
+  if ($('reset-password').value !== $('reset-repeat').value) {
+    formMessage('reset-message', 'Пароли не совпадают.', true); return;
+  }
+  $('submit-reset').disabled = true;
+  try {
+    await api('/password/reset', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:resetToken, password:$('reset-password').value})});
+    $('reset-dialog').close();
+    loggedOut();
+    $('login-error').textContent = 'Новый пароль сохранён. Войдите с ним в систему.';
+    $('password').focus();
+  } catch (error) { formMessage('reset-message', error.message, true); }
+  finally { $('submit-reset').disabled = false; }
+};
 $('open-register').onclick = async () => {
   const message = $('register-message');
   $('register-form').reset();
@@ -190,6 +246,7 @@ $('login-form').addEventListener('submit', async e => {
     await loggedIn(user);
   } catch (e) {
     $('login-error').textContent = e.message;
+    if (e.resetRequired) $('open-forgot').click();
   } finally {
     button.disabled = false;
   }
@@ -248,8 +305,21 @@ async function refreshUsers() {
   for (const user of users) {
     const row = el('tr'), name = el('td'), status = el('td'), actions = el('td');
     name.append(el('strong', user.username), el('small', user.is_admin ? 'Администратор' : 'Пользователь'));
-    if (user.email) name.append(el('small', user.email));
+    name.append(el('small', user.email || 'Email не указан'));
     status.append(el('span', user.enabled ? 'Активен' : 'Отключён', 'user-status' + (user.enabled ? '' : ' inactive')));
+    if (user.reset_required) status.append(el('small', 'Требуется новый пароль'));
+    const account = el('button', user.is_admin ? 'Email' : 'Email / сброс пароля');
+    account.type = 'button';
+    account.onclick = () => {
+      accountTarget = user;
+      $('admin-account-title').textContent = user.username;
+      $('admin-user-email').value = user.email || '';
+      $('admin-reset-controls').hidden = user.is_admin || !user.enabled;
+      $('admin-reset-result').hidden = true;
+      formMessage('admin-account-message', '');
+      $('admin-account-dialog').showModal();
+    };
+    actions.append(account);
     if (user.is_admin) {
       actions.append(el('span', 'Защищён', 'muted'));
     } else {
@@ -280,7 +350,7 @@ $('create-user-form').onsubmit = async event => {
   try {
     const user = await api('/admin/users', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({username: $('new-username').value, password: $('new-password').value})
+      body: JSON.stringify({username: $('new-username').value, password: $('new-password').value, email: $('new-email').value})
     });
     if (auth !== state.csrf) return;
     $('create-user-form').reset();
@@ -294,6 +364,49 @@ $('create-user-form').onsubmit = async event => {
   }
 };
 $('refresh-users').onclick = () => refreshUsers().catch(error => notice(error.message));
+$('close-admin-account').onclick = () => $('admin-account-dialog').close();
+$('admin-account-dialog').onclose = () => {
+  accountTarget = null;
+  $('admin-reset-link').value = '';
+  $('admin-user-email').value = '';
+};
+$('admin-email-form').onsubmit = async event => {
+  event.preventDefault();
+  if (!accountTarget || !state.isAdmin) return;
+  const target = accountTarget, auth = state.csrf;
+  $('save-user-email').disabled = true;
+  try {
+    await api('/admin/users/'+target.id+'/email', {method:'PATCH', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:$('admin-user-email').value})});
+    if (auth !== state.csrf || target !== accountTarget) return;
+    $('admin-reset-result').hidden = true;
+    $('admin-reset-link').value = '';
+    formMessage('admin-account-message', 'Email сохранён. Предыдущие ссылки восстановления отменены.');
+    await refreshUsers();
+  } catch (error) { if (auth === state.csrf) formMessage('admin-account-message', error.message, true); }
+  finally { $('save-user-email').disabled = false; }
+};
+$('admin-reset-confirm').onclick = async () => {
+  if (!accountTarget || !state.isAdmin) return;
+  const target = accountTarget, auth = state.csrf;
+  $('admin-reset-confirm').disabled = true;
+  formMessage('admin-account-message', '');
+  try {
+    const result = await api('/admin/users/'+target.id+'/reset-password', {method:'POST'});
+    if (auth !== state.csrf || target !== accountTarget) return;
+    $('admin-reset-link').value = result.reset_link;
+    $('admin-reset-delivery').textContent = result.email_sent
+      ? 'Пароль сброшен. Ссылка отправлена на сохранённый email.'
+      : 'Пароль сброшен. Письмо не отправлено: передайте ссылку пользователю лично или проверьте email и настройку почты.';
+    $('admin-reset-result').hidden = false;
+    await refreshUsers();
+  } catch (error) { if (auth === state.csrf) formMessage('admin-account-message', error.message, true); }
+  finally { $('admin-reset-confirm').disabled = false; }
+};
+$('copy-reset-link').onclick = async () => {
+  try { await navigator.clipboard.writeText($('admin-reset-link').value); formMessage('admin-account-message', 'Ссылка скопирована.'); }
+  catch { $('admin-reset-link').select(); formMessage('admin-account-message', 'Нажмите Ctrl+C, чтобы скопировать выделенную ссылку.'); }
+};
 $('password-settings').onclick = () => {
   $('change-password-form').reset();
   $('password-message').hidden = true;
@@ -875,3 +988,4 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') shiftSlice(-1);
 });
 api('/me').then(loggedIn).catch(() => loggedOut());
+openResetLink();

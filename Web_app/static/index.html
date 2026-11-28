@@ -9,6 +9,7 @@
 <label>Пароль<input id="password" type="password" autocomplete="current-password" required maxlength="128"></label>
 <button class="primary" type="submit">Войти в систему →</button><p id="login-error" role="alert"></p>
 <button id="open-register" type="button">Первый вход? Создать учётную запись</button>
+<button id="open-forgot" type="button">Забыли пароль?</button>
 <small class="muted">Войдите по имени пользователя или зарегистрируйтесь самостоятельно.</small></form></section>
 <dialog id="register-dialog" aria-labelledby="register-title"><form id="register-form" class="user-form">
 <div><p class="eyebrow">ПЕРВЫЙ ВХОД</p><h2 id="register-title">Создать учётную запись</h2></div>
@@ -17,11 +18,26 @@
 <label>Электронная почта<input id="register-email" type="email" autocomplete="email" required maxlength="254"></label>
 <label>Пароль<input id="register-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
 <label>Повторите пароль<input id="register-password-repeat" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
-<small>От 12 до 128 символов. Пароль задаётся вами, письма не отправляются.</small>
+<small>От 12 до 128 символов. Сохраните доступ к email: он понадобится для восстановления пароля.</small>
 <label class="check consent-check"><input id="register-consent" type="checkbox" required><span id="register-consent-text"></span></label>
 <a id="privacy-link" target="_blank" rel="noopener noreferrer" hidden>Политика обработки персональных данных ↗</a>
 <p id="register-message" class="form-message error" role="alert" hidden></p>
 <div class="dialog-actions"><button id="cancel-register" type="button">Отмена</button><button id="submit-register" class="primary" type="submit">Зарегистрироваться</button></div>
+</form></dialog>
+<dialog id="forgot-dialog" aria-labelledby="forgot-title"><form id="forgot-form" class="user-form">
+<div><p class="eyebrow">ВОССТАНОВЛЕНИЕ ДОСТУПА</p><h2 id="forgot-title">Забыли пароль?</h2></div>
+<p class="muted">Укажите email, сохранённый в вашей учётной записи. Мы отправим одноразовую ссылку для создания нового пароля.</p>
+<label>Email<input id="forgot-email" type="email" autocomplete="email" required maxlength="254"></label>
+<p id="forgot-message" class="form-message" role="status" hidden></p>
+<div class="dialog-actions"><button id="cancel-forgot" type="button">Закрыть</button><button id="submit-forgot" type="submit" class="primary">Отправить ссылку</button></div>
+</form></dialog>
+<dialog id="reset-dialog" aria-labelledby="reset-title"><form id="reset-form" class="user-form">
+<div><p class="eyebrow">НОВЫЙ ПАРОЛЬ</p><h2 id="reset-title">Восстановить доступ</h2></div>
+<p class="muted">Задайте новый пароль от 12 до 128 символов. После сохранения войдите с ним в систему.</p>
+<label>Новый пароль<input id="reset-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+<label>Повторите пароль<input id="reset-repeat" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+<p id="reset-message" class="form-message error" role="alert" hidden></p>
+<div class="dialog-actions"><button id="cancel-reset" type="button">Отмена</button><button id="submit-reset" type="submit" class="primary">Сохранить новый пароль</button></div>
 </form></dialog>
 <div id="workspace" hidden>
 <aside><div class="logo"><div class="brand-mark">S</div><strong>SUD <span>YOLO26</span></strong></div>
@@ -60,6 +76,7 @@
 <p class="eyebrow">НОВАЯ УЧЁТНАЯ ЗАПИСЬ</p><h2>Создать пользователя</h2>
 <label for="new-username">Логин<input id="new-username" name="new-username" autocomplete="off" required minlength="3" maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9_.@\-]{2,79}" aria-describedby="username-help"></label>
 <small id="username-help">От 3 до 80 символов: латинские буквы, цифры, _.@-</small>
+<label>Email для восстановления<input id="new-email" type="email" autocomplete="off" maxlength="254"></label>
 <label for="new-password">Пароль<input id="new-password" name="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128" aria-describedby="password-help"></label>
 <small id="password-help">От 12 до 128 символов. Передайте пароль пользователю лично.</small>
 <label class="check"><input id="show-new-password" type="checkbox"> Показать пароль</label>
@@ -69,10 +86,18 @@
 <div class="card users-card"><div class="users-heading"><div><p class="eyebrow">ДОСТУП К СИСТЕМЕ</p><h2>Учётные записи</h2></div><button id="refresh-users" type="button">Обновить</button></div>
 <p id="users-count" class="muted" role="status"></p>
 <div class="table-wrap"><table class="users-table"><thead><tr><th scope="col">Пользователь</th><th scope="col">Статус</th><th scope="col">Исследования</th><th scope="col">Действие</th></tr></thead><tbody id="users-list"></tbody></table></div>
-<p class="muted users-note">Удаление закрывает доступ и завершает сеансы пользователя. Его исследования сохраняются на сервере. Учётная запись admin защищена от удаления.</p>
+<p class="muted users-note">Сброс пароля завершает сеансы и требует создать новый пароль. Удаление закрывает доступ; исследования сохраняются. Учётная запись admin защищена от удаления и сброса другими пользователями.</p>
 </div></div></section>
 <section id="empty" class="card" hidden><h2>Сначала выберите готовое исследование</h2><p class="muted">Откройте результат в разделе «Исследования».</p></section>
 <dialog id="delete-user-dialog" aria-labelledby="delete-user-title"><h2 id="delete-user-title">Удалить пользователя?</h2><p id="delete-user-description"></p><p class="muted">Вход будет запрещён, открытые сеансы завершатся. Исследования сохранятся на сервере. Удалённый логин останется зарезервированным.</p><div class="dialog-actions"><button id="cancel-delete-user" type="button" autofocus>Отмена</button><button id="confirm-delete-user" class="danger" type="button">Удалить пользователя</button></div></dialog>
+<dialog id="admin-account-dialog" aria-labelledby="admin-account-title"><div class="user-form">
+<div><p class="eyebrow">УЧЁТНАЯ ЗАПИСЬ</p><h2 id="admin-account-title"></h2></div>
+<form id="admin-email-form" class="user-form"><label>Email<input id="admin-user-email" type="email" required maxlength="254"></label><button id="save-user-email" type="submit">Сохранить email</button></form>
+<p id="admin-account-message" class="form-message" role="status" hidden></p>
+<section id="admin-reset-controls"><p class="muted">После сброса старый пароль не даст доступа к исследованиям. Пользователь должен создать новый по одноразовой ссылке; все его сеансы завершатся.</p><button id="admin-reset-confirm" type="button" class="danger">Сбросить пароль</button></section>
+<div id="admin-reset-result" hidden><p id="admin-reset-delivery"></p><label>Одноразовая ссылка (30 минут)<input id="admin-reset-link" readonly aria-label="Одноразовая ссылка для пользователя"></label><small>Если письмо не доставлено, передайте ссылку пользователю лично по защищённому каналу. При смене email или повторном сбросе ссылка перестанет действовать.</small><button id="copy-reset-link" type="button">Копировать ссылку</button></div>
+<div class="dialog-actions"><button id="close-admin-account" type="button">Закрыть</button></div>
+</div></dialog>
 <dialog id="password-dialog" aria-labelledby="password-title"><form id="change-password-form" class="user-form"><div><p class="eyebrow">МОЯ УЧЁТНАЯ ЗАПИСЬ</p><h2 id="password-title">Сменить пароль</h2></div>
 <label>Текущий пароль<input id="current-password" type="password" autocomplete="current-password" required maxlength="128"></label>
 <label>Новый пароль<input id="changed-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>

@@ -20,6 +20,23 @@ class RegistrationSettings:
 
 
 @dataclass(frozen=True)
+class MailSettings:
+    host: str = 'smtp.yandex.ru'
+    port: int = 465
+    username: str = ''
+    password: str = field(default='', repr=False)
+    sender: str = ''
+
+    @classmethod
+    def from_env(cls):
+        return cls(host=os.getenv('SUD_SMTP_HOST', 'smtp.yandex.ru'),
+            port=int(os.getenv('SUD_SMTP_PORT', '465')),
+            username=os.getenv('SUD_SMTP_USER', ''),
+            password=os.getenv('SUD_SMTP_PASSWORD', ''),
+            sender=os.getenv('SUD_MAIL_FROM', '') or os.getenv('SUD_SMTP_USER', ''))
+
+
+@dataclass(frozen=True)
 class Settings:
     data: Path
     database_url: str
@@ -35,6 +52,7 @@ class Settings:
     session_seconds: int = 8 * 3600
     lease_seconds: int = 90
     registration: RegistrationSettings = field(default_factory=RegistrationSettings)
+    mail: MailSettings = field(default_factory=MailSettings)
 
     @classmethod
     def from_env(cls):
@@ -52,6 +70,7 @@ class Settings:
             max_user_bytes=int(os.getenv("SUD_MAX_USER_BYTES", str(40 * 1024**3))),
             job_timeout=int(os.getenv("SUD_JOB_TIMEOUT", "3600")),
             registration=RegistrationSettings.from_env(),
+            mail=MailSettings.from_env(),
         )
 
     def job_dir(self, user_id, job_id):

@@ -51,7 +51,13 @@ services:
   api:
     build: {context: .., dockerfile: Web_app/Dockerfile, target: api}
     image: sud-yolo26-api:local
-    environment: *runtime
+    environment:
+      <<: *runtime
+      SUD_SMTP_HOST: ${SUD_SMTP_HOST:-smtp.yandex.ru}
+      SUD_SMTP_PORT: ${SUD_SMTP_PORT:-465}
+      SUD_SMTP_USER: ${SUD_SMTP_USER:-}
+      SUD_SMTP_PASSWORD: ${SUD_SMTP_PASSWORD:-}
+      SUD_MAIL_FROM: ${SUD_MAIL_FROM:-}
     ports: ['${SUD_BIND:-127.0.0.1}:${SUD_PORT:-8080}:8080']
     volumes: [studies:/data]
     depends_on:
