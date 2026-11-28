@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from sud_yolo26.lithotripsy.config import Config
 from sud_yolo26.reporting.pdf_report import detected_slice_image, _calc_laser_table
 from sud_yolo26.ui.views import StaticImageLabel
-from .theme import STYLE, workspace_font
+from .theme import workspace_font, theme_controller, apply_theme, update_theme_button
 from .volume_view import VolumeView
 from .laser_legend import MODE_LEGEND, pdf_cell_colour, colour_mode
 
@@ -61,19 +61,12 @@ class StoneDetailsDialog(QDialog):
         self.setObjectName('StoneDetails')
         self.setWindowTitle('SUD YOLO26 — подробный анализ камня')
         self.setFont(workspace_font())
-        self.setStyleSheet(STYLE + '''
-            QDialog#StoneDetails {background:#f3f6f8;}
-            QLabel#Metric {font-size:19pt;font-weight:600;color:#177f85;}
-            QLabel#Section {font-size:12pt;font-weight:600;}
-            QTabWidget::pane {border:0;}
-            QTabBar::tab {padding:12px 20px;background:#e9eff2;color:#607783;
-                border-bottom:3px solid transparent;}
-            QTabBar::tab:selected {background:white;color:#177f85;border-bottom:3px solid #177f85;}
-            QTableWidget::item:selected {background:#177f85;color:white;}
-        ''')
+        self.theme = theme_controller()
         self.resize(1380, 900)
         self.setMinimumSize(1040, 720)
         self._build()
+        self.theme.changed.connect(self._apply_theme)
+        self._apply_theme(self.theme.name)
         # Opening from the workspace preserves its current selection, including an empty side.
         self.side.setCurrentIndex(side)
         self._populate(index)
@@ -84,6 +77,11 @@ class StoneDetailsDialog(QDialog):
             button.setObjectName('Primary')
         button.clicked.connect(callback)
         return button
+
+    def _apply_theme(self, name):
+        apply_theme(self, name)
+        update_theme_button(self.theme_button, name)
+        self.volume.set_theme(name)
 
     @staticmethod
     def _label(text='', name=None):
@@ -120,6 +118,8 @@ class StoneDetailsDialog(QDialog):
         self.context = self._label('', 'Muted')
         titles.addWidget(self.context)
         header.addLayout(titles, 1)
+        self.theme_button = self._button('', self.theme.toggle)
+        header.addWidget(self.theme_button)
         self.pdf_button = self._button('Сохранить PDF', self.export_pdf)
         self.pdf_button.setEnabled(Path(self.result.get('pdfFileName', '')).is_file())
         header.addWidget(self.pdf_button)
@@ -149,7 +149,7 @@ class StoneDetailsDialog(QDialog):
             box.addWidget(self._label(title, 'Muted'))
             value = self._label('—', 'Metric')
             if title == 'Габариты, мм':
-                value.setStyleSheet('font-size:14pt;font-weight:600;color:#177f85;')
+                value.setObjectName('DimensionsMetric')
             box.addWidget(value)
             cards.addWidget(panel, 2 if title == 'Габариты, мм' else 1)
             self.metrics.append(value)

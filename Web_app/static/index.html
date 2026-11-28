@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SUD · YOLO26</title><link rel="stylesheet" href="/static/style.css">
+<title>SUD · YOLO26</title><script src="/static/theme.js"></script><link rel="stylesheet" href="/static/style.css">
 <script src="/assets/plotly.min.js" defer></script><script src="/static/encrypted-upload.js" defer></script><script src="/static/app.js" defer></script></head>
 <body>
 <section id="login" class="login"><form id="login-form" class="card login-card">
@@ -10,6 +10,7 @@
 <button class="primary" type="submit">Войти в систему →</button><p id="login-error" role="alert"></p>
 <button id="open-register" type="button">Первый вход? Создать учётную запись</button>
 <button id="open-forgot" type="button">Забыли пароль?</button>
+<button data-theme-toggle type="button">Светлая тема</button>
 <small class="muted">Войдите по имени пользователя или зарегистрируйтесь самостоятельно.</small></form></section>
 <dialog id="register-dialog" aria-labelledby="register-title"><form id="register-form" class="user-form">
 <div><p class="eyebrow">ПЕРВЫЙ ВХОД</p><h2 id="register-title">Создать учётную запись</h2></div>
@@ -48,7 +49,7 @@
 <button data-view="laser">04 <span>Время разрушения</span></button>
 <button id="users-nav" data-view="users" hidden>05 <span>Пользователи</span></button></nav>
 <div class="aside-bottom"><span id="account"></span><button id="password-settings" type="button">Сменить пароль</button><button id="logout">Выйти из системы</button><small>Приватные исследования · серверная обработка</small></div></aside>
-<main><header><div><p class="eyebrow">SMART UROLOGY · WEB</p><h1 id="page-title">Исследования</h1></div><span class="badge">YOLO26s</span></header>
+<main><header><div><p class="eyebrow">SMART UROLOGY · WEB</p><h1 id="page-title">Исследования</h1></div><div class="header-actions"><button data-theme-toggle type="button">Светлая тема</button><span class="badge">YOLO26s</span></div></header>
 <p id="notice" role="status" hidden></p>
 <div id="study-bar" class="card study-bar" hidden><label>Серия исследования<select id="series"></select></label><span id="identity"></span><a id="pdf" class="button primary" hidden>Скачать PDF ↓</a></div>
 <section id="studies" class="view">

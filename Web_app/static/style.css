@@ -1,10 +1,42 @@
 :root{
   font-family:Inter,Segoe UI,Arial,sans-serif;
-  color:#253846;
-  background:#f1f5f7;
+  color:var(--text);
+  background:var(--bg);
   font-size:15px;
   --teal:#177f85;
-  --line:#dce5e9
+  --line:#dce5e9;
+  --bg:#f1f5f7;
+  --panel:#ffffff;
+  --raised:#eaf1f5;
+  --text:#253846;
+  --muted:#607783;
+  --hover:#e6f3f2;
+  --selected:#d8eeed;
+  --on-accent:#ffffff;
+  --danger:#a12c45;
+  --danger-bg:#fbeef1;
+  --success:#126d5b;
+  --success-bg:#e5f4ed;
+  --shadow:0 3px 15px #18354605;
+  color-scheme:light
+}
+:root[data-theme=dark]{
+  --bg:#060f1e;
+  --panel:#0b1b2e;
+  --raised:#10273e;
+  --text:#e5eef7;
+  --muted:#a0b5cb;
+  --teal:#36dce8;
+  --line:#24465f;
+  --hover:#12374b;
+  --selected:#104455;
+  --on-accent:#04212b;
+  --danger:#ff9ab0;
+  --danger-bg:#361e31;
+  --success:#76dfc7;
+  --success-bg:#0e343a;
+  --shadow:0 10px 35px #00000030;
+  color-scheme:dark
 }
 *{
   box-sizing:border-box
@@ -19,15 +51,15 @@ button,.button{
   border:1px solid var(--line);
   border-radius:8px;
   padding:10px 15px;
-  background:white;
-  color:#253846;
+  background:var(--panel);
+  color:var(--text);
   cursor:pointer;
   text-decoration:none;
   display:inline-block
 }
 button:hover,.button:hover{
   border-color:var(--teal);
-  background:#eef8f7
+  background:var(--hover)
 }
 button:disabled{
   opacity:.45;
@@ -45,18 +77,19 @@ button:disabled{
 }
 .primary{
   background:var(--teal);
-  color:white;
+  color:var(--on-accent);
   border-color:var(--teal)
 }
 .primary:hover{
-  background:#116b70;
-  color:white
+  filter:brightness(1.12);
+  background:var(--teal);
+  color:var(--on-accent)
 }
 input:not([type=checkbox]):not([type=range]):not([type=file]),select{
   border:1px solid var(--line);
   border-radius:7px;
   padding:10px;
-  background:white;
+  background:var(--panel);
   color:inherit;
   max-width:100%
 }
@@ -86,21 +119,21 @@ p{
   line-height:1.6
 }
 .muted,small{
-  color:#667c88
+  color:var(--muted)
 }
 .eyebrow{
   font-size:.7rem;
   font-weight:700;
   letter-spacing:1.5px;
-  color:#748b97;
+  color:var(--muted);
   margin:0 0 10px
 }
 .card{
-  background:white;
+  background:var(--panel);
   border:1px solid var(--line);
   border-radius:14px;
   padding:24px;
-  box-shadow:0 3px 15px #18354605
+  box-shadow:var(--shadow)
 }
 .login{
   min-height:100vh;
@@ -109,7 +142,7 @@ p{
   padding:20px
 }
 .login-card{
-  width:420px;
+  width:min(420px,100%);
   display:flex;
   flex-direction:column;
   gap:15px;
@@ -122,26 +155,26 @@ p{
   height:42px;
   border-radius:13px;
   background:var(--teal);
-  color:white;
+  color:var(--on-accent);
   font-size:24px;
   font-weight:700
 }
 h1 span,.logo span{
   font-weight:400;
-  color:#718a97;
+  color:var(--muted);
   font-size:.75em
 }
 .login-card p{
   margin:0
 }
 #login-error{
-  color:#a12c45
+  color:var(--danger)
 }
 aside{
   position:fixed;
   inset:0 auto 0 0;
   width:250px;
-  background:#fff;
+  background:var(--panel);
   border-right:1px solid var(--line);
   padding:28px 18px;
   display:flex;
@@ -164,15 +197,15 @@ nav button{
   border-color:transparent;
   text-align:left;
   padding:15px 10px;
-  color:#78909b
+  color:var(--muted)
 }
 nav span{
-  color:#344d5b
+  color:var(--text)
 }
 nav .active{
-  background:#e7f3f2;
+  background:var(--selected);
   color:var(--teal);
-  border-color:#d5eae8
+  border-color:var(--teal)
 }
 nav .active span{
   color:var(--teal);
@@ -200,8 +233,8 @@ header{
   margin-bottom:26px
 }
 .badge{
-  background:#e2efed;
-  border:1px solid #c8e2de;
+  background:var(--selected);
+  border:1px solid var(--line);
   color:var(--teal);
   padding:8px 12px;
   border-radius:20px;
@@ -221,7 +254,7 @@ header{
   color:var(--teal);
   font-weight:600;
   cursor:pointer;
-  background:#f7fbfb
+  background:var(--raised)
 }
 .drop input{
   max-width:260px;
@@ -231,7 +264,7 @@ header{
   font-weight:400
 }
 .drop.drag{
-  background:#dcefeb
+  background:var(--selected)
 }
 progress{
   width:100%;
@@ -274,7 +307,7 @@ progress{
   margin-top:10px
 }
 .job-error{
-  color:#a12c45;
+  color:var(--danger);
   font-size:.85rem
 }
 .study-bar{
@@ -345,7 +378,7 @@ canvas{
   margin:24px 0
 }
 .metric{
-  background:#f5f8fa;
+  background:var(--raised);
   border-radius:10px;
   padding:15px
 }
@@ -372,7 +405,7 @@ canvas{
 .previews img{
   width:100%;
   object-fit:contain;
-  background:#f5f8fa;
+  background:var(--raised);
   border-radius:10px;
   max-height:380px
 }
@@ -404,7 +437,7 @@ td button{
   font-size:.9rem
 }
 td button:hover,td button:focus{
-  outline:2px solid #253846;
+  outline:2px solid var(--text);
   outline-offset:-3px
 }
 .legend{
@@ -427,7 +460,7 @@ td button:hover,td button:focus{
 }
 #mode{
   padding:14px;
-  background:#f0f6f6;
+  background:var(--raised);
   border-radius:8px;
   min-height:55px;
   font-size:.9rem
@@ -482,7 +515,7 @@ td button:hover,td button:focus{
   border-bottom:1px solid var(--line)
 }
 .users-table th{
-  background:#f4f8fa;
+  background:var(--raised);
   font-size:.8rem;
   white-space:nowrap
 }
@@ -498,16 +531,16 @@ td button:hover,td button:focus{
   display:inline-block;
   padding:5px 9px;
   border-radius:20px;
-  color:#126d5b;
-  background:#e5f4ed;
+  color:var(--success);
+  background:var(--success-bg);
   font-size:.8rem
 }
 .user-status.inactive{
-  color:#6f7580;
-  background:#edf0f3
+  color:var(--muted);
+  background:var(--raised)
 }
 .delete-user{
-  color:#a12c45
+  color:var(--danger)
 }
 .users-note,.form-message{
   font-size:.85rem;
@@ -516,13 +549,13 @@ td button:hover,td button:focus{
 .form-message{
   padding:12px;
   border-radius:8px;
-  color:#126d5b;
-  background:#e5f4ed;
+  color:var(--success);
+  background:var(--success-bg);
   overflow-wrap:anywhere
 }
 .form-message.error{
-  color:#a12c45;
-  background:#fbeef1
+  color:var(--danger);
+  background:var(--danger-bg)
 }
 dialog{
   width:min(520px,calc(100vw - 32px));
@@ -530,6 +563,7 @@ dialog{
   border-radius:16px;
   padding:28px;
   color:inherit;
+  background:var(--panel);
   box-shadow:0 20px 80px #16232d33
 }
 dialog::backdrop{
@@ -571,9 +605,31 @@ dialog::backdrop{
   }
 }
 .users-table td:last-child button{margin:3px;white-space:normal}
-#admin-reset-result{padding:14px;border:1px solid #bddddd;border-radius:10px;background:#f1f9f9}
+#admin-reset-result{padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--raised)}
 #admin-reset-result input{width:100%;min-width:0}
+.header-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+[data-theme-toggle]{font-size:.85rem;white-space:nowrap}
+a:not(.button){color:var(--teal)}
+button,input,select{transition:border-color .15s,box-shadow .15s}
+:root[data-theme=dark] body{
+  background:radial-gradient(ellipse at 90% 0%,#11203d 0,transparent 55%),var(--bg);
+  min-height:100vh;background-attachment:fixed
+}
+:root[data-theme=dark] aside{background:linear-gradient(170deg,#0b1b2e,#070f20)}
+:root[data-theme=dark] header{border-bottom:1px solid var(--line);padding-bottom:22px}
+:root[data-theme=dark] .brand-mark,:root[data-theme=dark] .primary{
+  background:linear-gradient(120deg,#42e8ed,#19bcd5);box-shadow:0 0 16px #22d9e51a
+}
+:root[data-theme=dark] nav .active{box-shadow:inset 3px 0 var(--teal),0 0 16px #22d9e510}
+:root[data-theme=dark] .card{border-top-color:#316481}
+:root[data-theme=dark] #notice{background:#332c1b;color:#f3d991;border-color:#77603a}
+:root[data-theme=dark] .drop{border-color:#327b8e}
+.js-plotly-plot .plotly .modebar{background:transparent!important}
+.js-plotly-plot .plotly .modebar-btn path{fill:var(--muted)!important}
+.js-plotly-plot .plotly .modebar-btn:hover path{fill:var(--teal)!important}
 @media(max-width:680px){
+  header{gap:12px;flex-wrap:wrap}
+  .header-actions{justify-content:flex-start}
   aside{
     position:static;
     width:auto;

@@ -118,6 +118,12 @@ class ImageCoordinates(QWidget):
         self.calibrate_button.setEnabled(True)
         self._draw_image()
 
+    def refresh_toolbar_theme(self):
+        """Recreate Matplotlib icons against the inherited Qt palette, keeping the image and zoom."""
+        for _, _, image_file, callback in self.toolbar.toolitems:
+            if image_file and callback in self.toolbar._actions:
+                self.toolbar._actions[callback].setIcon(self.toolbar._icon(image_file + '.png'))
+
     def _draw_image(self):
         self.axes.clear()
         if self.pixels is None:

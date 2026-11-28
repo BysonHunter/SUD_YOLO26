@@ -12,7 +12,7 @@ from sud_yolo26.ui.image_coordinates import ImageCoordinates
 from sud_yolo26.ui.views import StaticImageLabel
 from .study import Study,find_studies,image_paths,layer_number
 from .jobs import Job,import_dicom,detect,calculate
-from .theme import STYLE,workspace_font
+from .theme import workspace_font,theme_controller,apply_theme,update_theme_button
 from .volume_view import VolumeView
 
 
@@ -24,7 +24,7 @@ class WorkspaceWindow(QMainWindow):
         self.setObjectName('Workspace')
         self.setFont(workspace_font())
         self.setWindowTitle('SUD YOLO26 — рабочее пространство')
-        self.setStyleSheet(STYLE)
+        self.theme = theme_controller()
         self.resize(1380,900)
         self.setMinimumSize(1000,700)
         self.study=None
@@ -35,6 +35,8 @@ class WorkspaceWindow(QMainWindow):
         self.pending_source=None
         self.pending_output=None
         self._build()
+        self.theme.changed.connect(self._apply_theme)
+        self._apply_theme(self.theme.name)
         self._refresh_model()
         self.set_stage(0)
 
@@ -45,7 +47,7 @@ class WorkspaceWindow(QMainWindow):
         return button
 
     def _build(self):
-        root=QWidget();outer=QVBoxLayout(root);outer.setContentsMargins(18,14,18,10)
+        root=QWidget();root.setObjectName('WorkspaceRoot');outer=QVBoxLayout(root);outer.setContentsMargins(18,14,18,10)
         self.setCentralWidget(root)
         header=QHBoxLayout()
         brand=QLabel('SUD / Рабочее пространство');brand.setObjectName('Brand')
@@ -68,6 +70,7 @@ class WorkspaceWindow(QMainWindow):
             button.setCheckable(True);self.stage_group.addButton(button,index);left.addWidget(button)
         left.addStretch();self.model_status=QLabel();self.model_status.setWordWrap(True)
         self.model_status.setObjectName('Muted');left.addWidget(self.model_status)
+        self.theme_button=self._button('',self.theme.toggle);left.addWidget(self.theme_button)
         self.settings_button=self._button('Настройки',self.show_settings);left.addWidget(self.settings_button)
         self.exit_button=self._button('Выход',self.close);left.addWidget(self.exit_button)
         body.addWidget(sidebar)
@@ -136,6 +139,12 @@ class WorkspaceWindow(QMainWindow):
         self.cancel=self._button('Отмена',self.cancel_job);self.cancel.hide();progress_row.addWidget(self.cancel)
         work.addLayout(progress_row)
         self.status=QLabel('Готово к работе');self.status.setWordWrap(True);outer.addWidget(self.status)
+
+    def _apply_theme(self,name):
+        apply_theme(self,name)
+        update_theme_button(self.theme_button,name)
+        self.image.refresh_toolbar_theme()
+        self.volume.set_theme(name)
 
     def _refresh_model(self):
         self.config=settings.read_settings()
@@ -388,7 +397,7 @@ class WorkspaceWindow(QMainWindow):
 
     def show_settings(self):
         from sud_yolo26.ui.settings_dialog import show_settings_dialog
-        show_settings_dialog(*self.config,parent=self)
+        show_settings_dialog(*self.config,parent=self,appearance_controller=self.theme)
         self._refresh_model();self._update_actions()
 
     def closeEvent(self,event):

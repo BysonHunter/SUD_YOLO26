@@ -30,6 +30,7 @@ class SettingsDialog(QDialog):
         img_count: str,
         img_format: str,
         parent=None,
+        appearance_controller=None,
     ) -> None:
         super().__init__(parent)
 
@@ -48,6 +49,7 @@ class SettingsDialog(QDialog):
         self.default_input_dicom_folder = default_input_dicom_folder
         self.default_output_folder = default_output_folder
         self.current_color_theme = current_color_theme
+        self.appearance_controller = appearance_controller
         self.img_count = int(img_count) if img_count.isdigit() else 100
         self.img_format = img_format
 
@@ -90,9 +92,14 @@ class SettingsDialog(QDialog):
 
         # Цветовая тема
         self.color_combo = QComboBox()
-        for theme in cf.color_themes:
-            self.color_combo.addItem(theme)
-        self.color_combo.setCurrentText(self.current_color_theme)
+        if self.appearance_controller is not None:
+            self.color_combo.addItem('Тёмная', 'dark')
+            self.color_combo.addItem('Светлая', 'light')
+            self.color_combo.setCurrentIndex(self.color_combo.findData(self.appearance_controller.name))
+        else:
+            for theme in cf.color_themes:
+                self.color_combo.addItem(theme)
+            self.color_combo.setCurrentText(self.current_color_theme)
         btn_default_scheme = QPushButton(self.buttons[21])
         btn_default_scheme.clicked.connect(self._set_default_scheme)
         color_row = QHBoxLayout()
@@ -168,14 +175,17 @@ class SettingsDialog(QDialog):
             self.model_edit.setText(file_path)
 
     def _set_default_scheme(self) -> None:
-        self.color_combo.setCurrentText("SystemDefault")
+        if self.appearance_controller is not None:
+            self.color_combo.setCurrentIndex(self.color_combo.findData('dark'))
+        else:
+            self.color_combo.setCurrentText("SystemDefault")
 
     def _on_save(self) -> None:
         lang_of_interface = self.lang_combo.currentText()
         path_to_yolo_weights = self.model_edit.text()
         default_input_dicom_folder = self.input_edit.text()
         default_output_folder = self.output_edit.text()
-        current_color_theme = self.color_combo.currentText()
+        current_color_theme = self.current_color_theme if self.appearance_controller is not None else self.color_combo.currentText()
         img_count = str(self.img_count_spin.value())
         img_format = self.img_format_combo.currentText()
 
@@ -189,6 +199,8 @@ class SettingsDialog(QDialog):
             img_format,
         )
 
+        if self.appearance_controller is not None:
+            self.appearance_controller.set_theme(self.color_combo.currentData())
         self.accept()
 
 
@@ -201,6 +213,7 @@ def show_settings_dialog(
     img_count: str,
     img_format: str,
     parent=None,
+    appearance_controller=None,
 ) -> None:
     """Открыть диалог настроек и при необходимости сохранить изменения."""
     dialog = SettingsDialog(
@@ -212,5 +225,6 @@ def show_settings_dialog(
         img_count,
         img_format,
         parent=parent,
+        appearance_controller=appearance_controller,
     )
     dialog.exec()

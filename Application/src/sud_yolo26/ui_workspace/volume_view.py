@@ -9,6 +9,37 @@ class VolumeView(QWidget):
         self.box.setContentsMargins(0,0,0,0)
         self.plotter=None
         self.widget=None
+        self.theme_name='dark'
+
+    def set_theme(self,name):
+        from .theme import PALETTES
+        self.theme_name=name
+        if self.plotter is None:
+            return
+        colors=PALETTES[name]
+        from PyQt6.QtGui import QColor
+        color=QColor(colors['scene_text']).getRgbF()[:3]
+        self.plotter.set_background(colors['scene'],all_renderers=True)
+        for renderer in self.plotter.renderers:
+            for actor in renderer.actors.values():
+                if hasattr(actor,'GetTextProperty'):
+                    actor.GetTextProperty().SetColor(*color)
+                if hasattr(actor,'GetTitleTextProperty') and hasattr(actor,'GetLabelTextProperty'):
+                    if actor.IsA('vtkCubeAxesActor'):
+                        for axis in range(3):
+                            actor.GetTitleTextProperty(axis).SetColor(*color)
+                            actor.GetLabelTextProperty(axis).SetColor(*color)
+                            for prop in ('GetXAxesLinesProperty','GetYAxesLinesProperty','GetZAxesLinesProperty',
+                                         'GetXAxesGridlinesProperty','GetYAxesGridlinesProperty','GetZAxesGridlinesProperty'):
+                                getattr(actor,prop)().SetColor(*color)
+                    else:
+                        actor.GetTitleTextProperty().SetColor(*color)
+                        actor.GetLabelTextProperty().SetColor(*color)
+        for slider in self.plotter.widgets.slider_widgets:
+            representation=slider.GetRepresentation()
+            for prop in ('GetTitleProperty','GetLabelProperty','GetSliderProperty','GetTubeProperty','GetCapProperty'):
+                getattr(representation,prop)().SetColor(*color)
+        self.plotter.render()
 
     def show_volume(self,values,spacing,kind,title):
         from PyQt6.QtGui import QGuiApplication
@@ -32,6 +63,7 @@ class VolumeView(QWidget):
             bar.SetPosition(.79,.28)
             bar.GetLabelTextProperty().SetFontSize(10)
             bar.GetTitleTextProperty().SetFontSize(11)
+        self.set_theme(self.theme_name)
         self.widget=QVTKRenderWindowInteractor(self,rw=self.plotter.render_window,
                                              iren=self.plotter.iren.interactor)
         self.box.addWidget(self.widget)

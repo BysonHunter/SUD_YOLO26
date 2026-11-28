@@ -967,18 +967,62 @@ async function showModel(kind, cut = false) {
     if (!response.ok) throw Error('Модель недоступна.');
     const model = await response.json();
     if (epoch !== state.modelEpoch) return;
+    const layout = themedModelLayout(model.layout);
     Plotly.purge($('model'));
     $('model').replaceChildren();
-    await Plotly.newPlot($('model'), model.data, model.layout, {
+    await Plotly.newPlot($('model'), model.data, layout, {
       responsive: true,
       displaylogo: false,
       modeBarButtonsToRemove: ['sendDataToCloud']
     });
-    if (epoch === state.modelEpoch) $('model-info').textContent = kind === 'kidney' ? 'Почка и плотные участки HU >160' : cut ? 'Срез 15% по каждой оси' : 'Полный объём';
+    if (epoch === state.modelEpoch) {
+      await refreshModelTheme();
+      $('model-info').textContent = kind === 'kidney' ? 'Почка и плотные участки HU >160' : cut ? 'Срез 15% по каждой оси' : 'Полный объём';
+    }
   } catch (e) {
     if (epoch === state.modelEpoch) $('model-info').textContent = e.message;
   }
 }
+
+function modelThemeUpdates() {
+  const css = getComputedStyle(document.documentElement),
+    panel = css.getPropertyValue('--panel').trim(),
+    text = css.getPropertyValue('--text').trim(),
+    line = css.getPropertyValue('--line').trim();
+  const update = {paper_bgcolor:panel, plot_bgcolor:panel, 'font.color':text,
+    'scene.bgcolor':panel, 'hoverlabel.bgcolor':panel, 'hoverlabel.font.color':text};
+  for (const axis of ['xaxis', 'yaxis', 'zaxis']) {
+    const prefix = 'scene.' + axis;
+    Object.assign(update, {[prefix+'.color']:text, [prefix+'.gridcolor']:line,
+      [prefix+'.zerolinecolor']:line, [prefix+'.linecolor']:line,
+      [prefix+'.backgroundcolor']:panel, [prefix+'.tickfont.color']:text,
+      [prefix+'.title.font.color']:text});
+  }
+  return update;
+}
+
+function themedModelLayout(layout) {
+  // Appearance only: preserve physical axes, geometry, camera and HU colors.
+  const result = structuredClone(layout);
+  for (const [path, value] of Object.entries(modelThemeUpdates())) {
+    const keys = path.split('.');
+    let object = result;
+    for (const key of keys.slice(0, -1)) {
+      if (typeof object[key] === 'string' && key === 'title') object[key] = {text:object[key]};
+      if (!object[key] || typeof object[key] !== 'object') object[key] = {};
+      object = object[key];
+    }
+    object[keys.at(-1)] = value;
+  }
+  return result;
+}
+
+function refreshModelTheme() {
+  if (window.Plotly && $('model').data) return Plotly.relayout($('model'), modelThemeUpdates());
+}
+window.addEventListener('sud-themechange', () => {
+  Promise.resolve(refreshModelTheme()).catch(() => notice('Не удалось обновить тему 3D-просмотра. Откройте модель заново.'));
+});
 $('show-stone').onclick = () => showModel('stone');
 $('show-cut').onclick = () => showModel('stone', true);
 $('show-kidney').onclick = () => showModel('kidney');
